@@ -9,6 +9,7 @@
 //
 // 検証（-ShipSurfaceCheck、または AShipFleet の結合テスト）：真上からの正射影の深度で、描いた海面の高さを読み、
 // CPU（倍精度）の η(x, y, t) と頂点ごとに比べる（Godot の wave_shader_parity に当たるものを、実際に描いた海面で行う）。
+// 読み出しは非同期（GPU の写しを数フレーム後に受け取る）。同期で読むと描画が止まり、10 s ごとに 28 ms のカクつきが出た。
 // -ShipWaveParity=<reference.json>：wave_spectrum.hpp の結果を Godot の tests/unit/wave_parity/reference.json（Python 実装の値）と比べる。
 
 #pragma once
@@ -79,7 +80,9 @@ private:
 	void BuildMeshes();
 	void CreateWaveTexture();
 	void UpdateGpu();
-	void RunSurfaceCheck();
+	void StartSurfaceCheck();
+	void PollSurfaceCheck();
+	void FinishSurfaceCheck(const TArray<FLinearColor>& Px, const FVector& Cam, const FVector2D& Center, double Time);
 	static bool RunParity(const FString& Path);
 
 	UPROPERTY() TObjectPtr<UProceduralMeshComponent> Near;
@@ -111,6 +114,7 @@ private:
 	FVector2D RenderedCenter = FVector2D::ZeroVector;
 
 	bool bSurfaceCheckRequested = false;
+	TSharedPtr<struct FShipSurfaceReadback, ESPMode::ThreadSafe> PendingCheck;   // 受け取り待ちの検証
 	bool bAutoSurfaceCheck = false;
 	double NextAutoCheck = 2.0;
 };

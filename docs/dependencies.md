@@ -13,6 +13,7 @@
 - `Source/HakoniwaShip/Public/ThirdParty/wave_spectrum.hpp`：hakoniwa-mujoco-ship の `include/ship/environment/wave_spectrum.hpp` の写し（同じ MIT。`tools/gen_fleet_config.py --check` で同じか確かめる）
 - `SourceArt/Sky/sky_2k.exr`：Poly Haven「Kloofendal 48d Partly Cloudy (Pure Sky)」（CC0）を 2048×1024 に縮め、太陽の円盤を抑えたもの（`tools/make_sky_hdri.py`）
 - エンジンのプラグイン `ProceduralMeshComponent`（波面メッシュ）
+- `SourceArt/Ships/*.glb`（Step 4）：hakoniwa-godot-ship の `Models/<model>/<model>.glb` の写し（image2sim-framework の船舶生成器が作ったもの。`tools/gen_fleet_config.py --check` で同じか確かめる）
 
 ## shakoc の解決順序
 

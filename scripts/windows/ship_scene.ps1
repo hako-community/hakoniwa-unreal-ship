@@ -38,7 +38,7 @@ function Invoke-Editor([string[]]$Arguments, [string]$Log, [string]$Pattern) {
 
 if ($Build) {
     $log = Join-Path $logDir "build_$stamp.log"
-    Invoke-Editor @($uproject, '-unattended', '-nosplash', '-ShipBuildScene', '-ShipQuit', "-ShipMap=$map") $log 'LogShipEditor'
+    Invoke-Editor @($uproject, '-unattended', '-nosplash', '-ShipBuildScene', '-ShipQuit', "-ShipMap=$map") $log 'LogShipEditor|LogShipModel'
     if (-not (Select-String -Path $log -Pattern 'Ship.BuildScene OK' -Quiet)) { throw "場面を作れませんでした（$log）" }
 }
 
@@ -50,10 +50,15 @@ if ($Smoke) {
         "-ShipWaveParity=$parityRef")
     if ($NullRhi) { $gameArgs += '-nullrhi' } else { $gameArgs += '-ShipSurfaceCheck' }
     if ($Shot) { $gameArgs += @('-ShipChase', "-ShipShot=$(Join-Path $logDir "smoke_$stamp.png")") }
-    Invoke-Editor $gameArgs $log 'LogShipView|LogHakoniwa|LogShipOcean|Error'
+    Invoke-Editor $gameArgs $log 'LogShipView|LogHakoniwa|LogShipOcean|SHIP_MODEL|Error'
     $ok = Select-String -Path $log -Pattern 'HAKONIWA_UNREAL_SHIP_BOOT_OK' | Select-Object -First 1
     if (-not $ok) { throw "起動の確認に失敗しました（$log）" }
     if (-not (Select-String -Path $log -Pattern 'HAKONIWA_UNREAL_SHIP_WAVE_PARITY_OK' -Quiet)) { throw "波面の計算が参照値と一致しません（$log）" }
+    # 船の形（Step 4）：全船が glb のメッシュで、外形が fleet_ue.json と一致（1 mm 以内）
+    $models = @(Select-String -Path $log -Pattern 'SHIP_MODEL (\S+) .*: (\d+) glb meshes, (\d+) placeholder boxes, .* max bounds err ([0-9.e+-]+) m')
+    $badModels = @($models | Where-Object { [int]$_.Matches[0].Groups[3].Value -gt 0 -or [int]$_.Matches[0].Groups[2].Value -eq 0 -or [double]$_.Matches[0].Groups[4].Value -gt 1e-3 })
+    if ($models.Count -eq 0 -or $badModels.Count -gt 0) { throw "船の形が glb と一致しません（$log）" }
+    Write-Host "[ship_scene] ship models: $($models.Count) OK"
     if (-not $NullRhi) {
         # 各回の検証（SHIP_SEA surface check <n>: ... misses <m>, max err <e> m）がすべて許容内か
         $checks = @(Select-String -Path $log -Pattern 'SHIP_SEA surface check \d+:.*misses (\d+), max err ([0-9.e+-]+) m')

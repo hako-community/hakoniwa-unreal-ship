@@ -7,9 +7,10 @@
 //   空    ：Poly Haven の空パノラマ（SourceArt/Sky/sky_2k.exr、tools/make_sky_hdri.py）を空の球に貼り、空の光はそれを実時間で取り込む
 //   太陽  ：パノラマの太陽の向き（SourceArt/Sky/sky.json）の平行光。照度と空の輝度の比はパノラマのまま
 //   霧    ：水平線の空の色の高さの霧（遠くの海を空になじませる）
+//   船    ：Godot ビューアと同じ glb を部品ごとの StaticMesh に（ShipModelImport、Step 4）
 //   海面  ：AShipOcean（物理と同じ決定論的 Gerstner 波面、D4・D19）。材質は ShipOceanShader.h の HLSL から作る
 //   観客の開始位置・船団（AShipFleet、Step 2）
-// 作る資産は /Game/Ship/Generated（材質・空の画像）と地図。どちらも生成物（git に入れない）。
+// 作る資産は /Game/Ship/Generated（材質・空の画像・船のメッシュ）と地図。どちらも生成物（git に入れない）。
 
 #include "AssetImportTask.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -23,6 +24,7 @@
 #include "Editor.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
+#include "Engine/PostProcessVolume.h"
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
@@ -58,6 +60,7 @@
 #include "ShipFrame.h"
 #include "ShipOcean.h"
 #include "ShipOceanShader.h"
+#include "ShipModelImport.h"
 #include "ShipViewGameMode.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogShipEditor, Log, All);
@@ -68,6 +71,8 @@ namespace
 	const TCHAR* GeneratedDir = TEXT("/Game/Ship/Generated");
 	// 空の画像の値 → Unreal の輝度 [cd/m²]・照度 [lx]。太陽の照度がおよそ 9 万 lx（晴れの昼）になる倍率
 	constexpr double SkyNitsPerUnit = 20000.0;
+	// 露出 [EV100]（晴天の昼。r.EyeAdaptation.CachedLightingPreExposure=8 の範囲 −4〜16 の内）
+	constexpr float DaylightEV100 = 15.5f;   // 14.5・15.5・16 を比べて決めた（-ShipExposure=）
 	// 江の島の海（enoshima.tscn の ShaderMaterial_ocean の deep_color / shallow_color、sRGB）を線形にした色
 	const FLinearColor DeepColor = FLinearColor::FromSRGBColor(FColor(18, 38, 55));
 	const FLinearColor ShallowColor = FLinearColor::FromSRGBColor(FColor(23, 71, 74));
@@ -248,6 +253,22 @@ namespace
 		return Finish(M) ? M : nullptr;
 	}
 
+	/** 船の塗装の材質（Step 4）：glb の材質（両面、色・金属度・粗さ・発光）。値は実行時に AShipActor が材質ごとに入れる */
+	UMaterial* BuildPaintMaterial()
+	{
+		UMaterial* M = MakeMaterial(TEXT("M_ShipPaint"));
+		M->SetShadingModel(MSM_DefaultLit);
+		M->TwoSided = true;   // glb の材質はすべて doubleSided（Godot と同じ）
+		UMaterialEditingLibrary::ConnectMaterialProperty(Vector(M, TEXT("BaseColor"), FLinearColor(0.6f, 0.6f, 0.6f), 0), FString(), MP_BaseColor);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Scalar(M, TEXT("Metallic"), 0.0f, 100), FString(), MP_Metallic);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Scalar(M, TEXT("Roughness"), 0.5f, 200), FString(), MP_Roughness);
+		auto* Mul = Add<UMaterialExpressionMultiply>(M, -500, 300);
+		Mul->A.Connect(0, Vector(M, TEXT("Emissive"), FLinearColor::Black, 300));
+		Mul->B.Connect(0, Scalar(M, TEXT("EmissiveNits"), 1000.0f, 400));
+		UMaterialEditingLibrary::ConnectMaterialProperty(Mul, FString(), MP_EmissiveColor);
+		return Finish(M) ? M : nullptr;
+	}
+
 	/** 空の画像（SourceArt/Sky/sky_2k.exr）を取り込む。正距円筒の 2D の HDR 画像として使う */
 	UTexture2D* ImportSky()
 	{
@@ -335,7 +356,10 @@ namespace
 		UMaterial* FarMat = BuildFarMaterial();
 		UMaterial* SkyMat = SkyTex ? BuildSkyMaterial(SkyTex) : nullptr;
 		UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-		if (!SkyInfo || !OceanMat || !FarMat || !SkyMat || !Sphere)
+		// 船（Step 4）：glb の部品ごとの StaticMesh
+		UMaterial* PaintMat = BuildPaintMaterial();
+		const int32 ShipMeshes = PaintMat ? ShipModelImport::BuildShipMeshes(PaintMat) : -1;
+		if (!SkyInfo || !OceanMat || !FarMat || !SkyMat || !Sphere || ShipMeshes <= 0)
 		{
 			return false;
 		}
@@ -389,6 +413,16 @@ namespace
 		FogC->SetFogHeightFalloff(0.05f);
 		FogC->SetFogInscatteringColor(FLinearColor(Horizon.X, Horizon.Y, Horizon.Z));
 		FogC->SetFogCutoffDistance(9.5e6f);   // 空の球（100 km）には掛けない
+
+		// 露出（Step 4）：自動露出は暗い海に合わせて EV 13 まで明るくし、船の塗装が白っぽく見えた（Godot の紺の船体が水色に）。
+		// 晴天の昼の露出（sunny 16 の EV 15 付近）に固定する（EV 15.5 で Godot と同じく紺の船体・はっきりしたコンテナの色）
+		APostProcessVolume* Post = World->SpawnActor<APostProcessVolume>();
+		Post->SetActorLabel(TEXT("DaylightExposure"));
+		Post->bUnbound = true;
+		Post->Settings.bOverride_AutoExposureMinBrightness = true;
+		Post->Settings.bOverride_AutoExposureMaxBrightness = true;
+		Post->Settings.AutoExposureMinBrightness = DaylightEV100;
+		Post->Settings.AutoExposureMaxBrightness = DaylightEV100;
 
 		// 海面（Step 3）
 		AShipOcean* Ocean = World->SpawnActor<AShipOcean>();

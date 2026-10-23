@@ -64,6 +64,76 @@ UStaticMeshComponent* AShipActor::AddBox(USceneComponent* Parent, const FString&
 	return C;
 }
 
+UMaterialInterface* AShipActor::Paint(const FString& Slot, UMaterialInterface* Parent, const TSharedPtr<FJsonObject>& Materials)
+{
+	// glb の材質ごとに 1 つ（同じ船の部品で共有）。値は fleet_ue.json の materials（glTF の色は線形）
+	const FName Key(*Slot);
+	if (TObjectPtr<UMaterialInterface>* Found = Paints.Find(Key))
+	{
+		return *Found;
+	}
+	const TSharedPtr<FJsonObject>* M = nullptr;
+	UMaterialInterface* Result = Parent;
+	if (Materials && Materials->TryGetObjectField(Slot, M))
+	{
+		if (UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Parent, this))
+		{
+			const FVector C = JsonVec3(*M, TEXT("base_color"));
+			const FVector E = JsonVec3(*M, TEXT("emissive"));
+			Mid->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(C.X, C.Y, C.Z));
+			Mid->SetScalarParameterValue(TEXT("Metallic"), (*M)->GetNumberField(TEXT("metallic")));
+			Mid->SetScalarParameterValue(TEXT("Roughness"), (*M)->GetNumberField(TEXT("roughness")));
+			Mid->SetVectorParameterValue(TEXT("Emissive"), FLinearColor(E.X, E.Y, E.Z));
+			Result = Mid;
+		}
+	}
+	else
+	{
+		UE_LOG(LogShipActor, Warning, TEXT("%s: material %s not in fleet_ue.json"), *Robot, *Slot);
+	}
+	Paints.Add(Key, Result);
+	return Result;
+}
+
+void AShipActor::AddPart(USceneComponent* Parent, const TSharedPtr<FJsonObject>& Part, const FVector& OriginFlu, const TSharedPtr<FJsonObject>& Materials)
+{
+	const FString Node = Part->GetStringField(TEXT("node"));
+	const FVector BoxMin = JsonVec3(Part, TEXT("box_min"));
+	const FVector BoxMax = JsonVec3(Part, TEXT("box_max"));
+	const FString Name = TEXT("SM_") + Node;
+	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/Ship/Generated/Ships/%s/%s.%s"), *Model, *Name, *Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!Mesh)
+	{
+		AddBox(Parent, Node, BoxMin, BoxMax, JsonColor(Part));
+		++BoxParts;
+		return;
+	}
+	UStaticMeshComponent* C = NewObject<UStaticMeshComponent>(this, *Node);
+	C->SetMobility(EComponentMobility::Movable);
+	C->SetStaticMesh(Mesh);
+	C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	C->SetupAttachment(Parent);
+	C->SetRelativeLocation(ShipFrame::LocalToUnreal(OriginFlu));
+	const TArray<FStaticMaterial>& Slots = Mesh->GetStaticMaterials();
+	for (int32 i = 0; i < Slots.Num(); ++i)
+	{
+		C->SetMaterial(i, Paint(Slots[i].MaterialSlotName.ToString(), Slots[i].MaterialInterface, Materials));
+	}
+	C->RegisterComponent();
+	AddInstanceComponent(C);
+	++MeshParts;
+	// 座標の移しの確かめ：メッシュの外形（Unreal の cm）を FLU に戻して部品の原点を足したものが、glb から求めた外形の箱と一致するか
+	const FBox B = Mesh->GetBoundingBox();
+	const FVector A = ShipFrame::UnrealToLocal(B.Min), Z = ShipFrame::UnrealToLocal(B.Max);
+	const FVector Lo = A.ComponentMin(Z) + OriginFlu, Hi = A.ComponentMax(Z) + OriginFlu;
+	const double Err = FMath::Max((Lo - BoxMin).GetAbsMax(), (Hi - BoxMax).GetAbsMax());
+	MaxBoundsErr = FMath::Max(MaxBoundsErr, Err);
+	if (Err > 1.0e-3)
+	{
+		UE_LOG(LogShipActor, Warning, TEXT("%s/%s: mesh bounds differ from fleet_ue.json by %.4f m"), *Robot, *Node, Err);
+	}
+}
+
 bool AShipActor::BuildFromSpec(const TSharedPtr<FJsonObject>& Ship)
 {
 	Robot = Ship->GetStringField(TEXT("robot"));
@@ -71,10 +141,12 @@ bool AShipActor::BuildFromSpec(const TSharedPtr<FJsonObject>& Ship)
 #if WITH_EDITOR
 	SetActorLabel(Robot);
 #endif
+	const TSharedPtr<FJsonObject>* MaterialsPtr = nullptr;
+	const TSharedPtr<FJsonObject> Materials = Ship->TryGetObjectField(TEXT("materials"), MaterialsPtr) ? *MaterialsPtr : nullptr;
 	for (const TSharedPtr<FJsonValue>& V : Ship->GetArrayField(TEXT("parts")))
 	{
 		const TSharedPtr<FJsonObject> P = V->AsObject();
-		AddBox(RootComponent, P->GetStringField(TEXT("node")), JsonVec3(P, TEXT("box_min")), JsonVec3(P, TEXT("box_max")), JsonColor(P));
+		AddPart(RootComponent, P, JsonVec3(P, TEXT("origin")), Materials);
 	}
 	for (const TSharedPtr<FJsonValue>& V : Ship->GetArrayField(TEXT("joints")))
 	{
@@ -90,11 +162,12 @@ bool AShipActor::BuildFromSpec(const TSharedPtr<FJsonObject>& Ship)
 		Pivot->RegisterComponent();
 		AddInstanceComponent(Pivot);
 		const TSharedPtr<FJsonObject> P = J->GetObjectField(TEXT("part"));
-		AddBox(Pivot, Joint.Node, JsonVec3(P, TEXT("box_min")), JsonVec3(P, TEXT("box_max")), JsonColor(P));
+		AddPart(Pivot, P, FVector::ZeroVector, Materials);   // 関節の部品の外形の箱は関節の原点からの相対
 		Joint.Pivot = Pivot;
 		Joints.Add(Joint);
 	}
-	UE_LOG(LogShipActor, Log, TEXT("%s (%s): %d parts, %d joints"), *Robot, *Model, Ship->GetArrayField(TEXT("parts")).Num(), Joints.Num());
+	UE_LOG(LogShipActor, Log, TEXT("SHIP_MODEL %s (%s): %d glb meshes, %d placeholder boxes, %d joints, %d materials, max bounds err %.2e m"),
+		*Robot, *Model, MeshParts, BoxParts, Joints.Num(), Paints.Num(), MaxBoundsErr);
 	return true;
 }
 

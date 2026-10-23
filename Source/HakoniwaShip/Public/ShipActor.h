@@ -2,7 +2,9 @@
 // 1 隻の船の見た目（SHP-24 Step 2）。姿勢と関節を受け取って描くだけで、箱庭とのやりとりは AShipFleet が受け持つ。
 //
 // 形は Config/Fleet/fleet_ue.json（tools/gen_fleet_config.py が glb から作る）の parts / joints。
-// Step 2 の形はメッシュごとの外形の箱（仮）。Step 4 で glb の取り込みに置き換える。
+// Step 4：部品は glb から場面づくりが作った StaticMesh（/Game/Ship/Generated/Ships/<model>/SM_<node>）を置き、
+// 材質の差し込み口（glb の材質名）に fleet_ue.json の materials の色などを入れる（Godot と同じ見た目）。
+// メッシュの外形を fleet_ue.json の外形の箱と比べる（MaxBoundsErr。座標の移しの確かめ）。メッシュが無ければ外形の箱を仮の形として置く。
 // 座標：アクタ = 船体の原点（MJCF の vessel・glb のルート）。FLU → Unreal は ShipFrame。
 
 #pragma once
@@ -53,8 +55,17 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Ship") FString Model;
 	UPROPERTY(VisibleAnywhere, Category = "Ship") TArray<FShipJoint> Joints;
 
+	/** 置いた部品の数（glb のメッシュ / 仮の箱）と、メッシュの外形と fleet_ue.json の外形の箱の差の最大 [m] */
+	UPROPERTY(VisibleAnywhere, Category = "Ship") int32 MeshParts = 0;
+	UPROPERTY(VisibleAnywhere, Category = "Ship") int32 BoxParts = 0;
+	double MaxBoundsErr = 0.0;
+
 private:
 	UStaticMeshComponent* AddBox(USceneComponent* Parent, const FString& Name, const FVector& MinFlu, const FVector& MaxFlu, const FLinearColor& Color);
+	/** 部品を置く。OriginFlu は親（船体または関節の原点）からの部品の原点（外形の箱は親の座標） */
+	void AddPart(USceneComponent* Parent, const TSharedPtr<FJsonObject>& Part, const FVector& OriginFlu, const TSharedPtr<FJsonObject>& Materials);
+	UMaterialInterface* Paint(const FString& Slot, UMaterialInterface* Parent, const TSharedPtr<FJsonObject>& Materials);
 
 	UPROPERTY() TObjectPtr<UMaterialInterface> BaseMaterial;
+	UPROPERTY() TMap<FName, TObjectPtr<UMaterialInterface>> Paints;
 };

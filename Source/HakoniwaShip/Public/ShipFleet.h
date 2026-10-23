@@ -164,8 +164,10 @@ private:
 	double FirstDisplayTime = -1.0;
 	int64 DisplayFrames = 0;
 	int64 DisplayHolds = 0;       // 表示時刻が進まなかったフレーム
-	int64 ClockSnaps = 0;         // 0.5 s 以上ずれて合わせ直した回数
+	int64 ClockSnaps = 0;         // 2 s 以上ずれて合わせ直した回数
 	double DisplayLagMax = 0.0;
+	int64 Hitches = 0;            // 始まって 5 s 後からの 25 ms を超えたフレーム（目に見えるカクつき）
+	int64 HitchFrames = 0;
 	int64 SamplesSkipped = 0;     // 補間の両端が隣り合うステップでないため標本を書かなかったフレーム
 
 	bool bSync = false;

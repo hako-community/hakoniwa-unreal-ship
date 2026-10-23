@@ -18,6 +18,9 @@
 #include "Misc/Parse.h"
 #include "UObject/ConstructorHelpers.h"
 #include "ProceduralMeshComponent.h"
+#include "RenderingThread.h"
+#include "RHIGPUReadback.h"
+#include "TextureResource.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "ShipFrame.h"
@@ -224,11 +227,12 @@ void AShipOcean::BuildMeshes()
 void AShipOcean::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (bSurfaceCheckRequested && bRendered)
+	PollSurfaceCheck();
+	if (bSurfaceCheckRequested && bRendered && !PendingCheck)
 	{
-		// 前のフレームで描画へ渡した状態（位置・波の表）がいま描かれている。新しい状態を渡す前に読む
+		// 前のフレームで描画へ渡した状態（位置・波の表）がいま描かれている。新しい状態を渡す前に撮る
 		bSurfaceCheckRequested = false;
-		RunSurfaceCheck();
+		StartSurfaceCheck();
 	}
 	if (!bPhysicsTime)
 	{
@@ -289,7 +293,20 @@ void AShipOcean::UpdateGpu()
 	bRendered = true;
 }
 
-void AShipOcean::RunSurfaceCheck()
+/** 非同期の読み出し：描画スレッドが GPU の写しを取り、届いたら Data に移して bReady を立てる */
+struct FShipSurfaceReadback
+{
+	TUniquePtr<FRHIGPUTextureReadback> Readback;
+	TArray<FLinearColor> Data;
+	std::atomic<bool> bReady { false };
+	bool bPolling = false;   // 描画スレッドへ確かめを頼んだ（届くまで毎フレーム頼む）
+	FVector Cam = FVector::ZeroVector;
+	FVector2D Center = FVector2D::ZeroVector;
+	double Time = 0.0;
+	int32 Frames = 0;
+};
+
+void AShipOcean::StartSurfaceCheck()
 {
 	if (!Capture)
 	{
@@ -316,13 +333,70 @@ void AShipOcean::RunSurfaceCheck()
 	const FVector Cam = ShipFrame::LocalToUnreal(RenderedCenter.X, RenderedCenter.Y, CheckHeightM) + FVector(0.5 * S, -0.5 * S, 0.0);
 	Capture->SetWorldLocationAndRotation(Cam, FRotator(-90.0, 0.0, 0.0));
 	Capture->CaptureScene();
-	TArray<FLinearColor> Px;
-	if (!CaptureTarget->GameThread_GetRenderTargetResource()->ReadLinearColorPixels(Px) || Px.Num() != CheckPixels * CheckPixels)
+	TSharedPtr<FShipSurfaceReadback, ESPMode::ThreadSafe> R = MakeShared<FShipSurfaceReadback, ESPMode::ThreadSafe>();
+	R->Readback = MakeUnique<FRHIGPUTextureReadback>(TEXT("ShipSurfaceCheck"));
+	R->Cam = Cam;
+	R->Center = RenderedCenter;
+	R->Time = RenderedTime;
+	FTextureRenderTargetResource* Res = CaptureTarget->GameThread_GetRenderTargetResource();
+	ENQUEUE_RENDER_COMMAND(ShipSurfaceCopy)([R, Res](FRHICommandListImmediate& RHICmdList)
 	{
-		UE_LOG(LogShipOcean, Error, TEXT("surface check: cannot read the capture"));
-		++SurfaceMisses;
+		R->Readback->EnqueueCopy(RHICmdList, Res->GetRenderTargetTexture());
+	});
+	PendingCheck = R;
+}
+
+void AShipOcean::PollSurfaceCheck()
+{
+	if (!PendingCheck)
+	{
 		return;
 	}
+	TSharedPtr<FShipSurfaceReadback, ESPMode::ThreadSafe> R = PendingCheck;
+	if (R->bReady.load())
+	{
+		PendingCheck.Reset();
+		if (R->Data.Num() != CheckPixels * CheckPixels)
+		{
+			UE_LOG(LogShipOcean, Error, TEXT("surface check: cannot read the capture"));
+			++SurfaceMisses;
+			return;
+		}
+		FinishSurfaceCheck(R->Data, R->Cam, R->Center, R->Time);
+		return;
+	}
+	if (++R->Frames > 600)
+	{
+		UE_LOG(LogShipOcean, Error, TEXT("surface check: readback timed out"));
+		++SurfaceMisses;
+		PendingCheck.Reset();
+		return;
+	}
+	// GPU の写しが届いたか描画スレッドで確かめ、届いていれば画素を移す（描画は止めない）
+	ENQUEUE_RENDER_COMMAND(ShipSurfacePoll)([R](FRHICommandListImmediate&)
+	{
+		if (R->bReady.load() || !R->Readback->IsReady())
+		{
+			return;
+		}
+		int32 Pitch = 0;
+		const FLinearColor* Src = static_cast<const FLinearColor*>(R->Readback->Lock(Pitch));
+		if (Src)
+		{
+			R->Data.SetNumUninitialized(CheckPixels * CheckPixels);
+			for (int32 y = 0; y < CheckPixels; ++y)
+			{
+				FMemory::Memcpy(&R->Data[y * CheckPixels], Src + y * Pitch, CheckPixels * sizeof(FLinearColor));
+			}
+		}
+		R->Readback->Unlock();
+		R->bReady.store(true);
+	});
+}
+
+void AShipOcean::FinishSurfaceCheck(const TArray<FLinearColor>& Px, const FVector& Cam, const FVector2D& Center, double Time)
+{
+	const double S = StepM * 100.0;
 	const double Tide = Params.tide_level_m;
 	double MaxErr = 0.0, MaxEta = 0.0;
 	int64 Misses = 0;
@@ -340,9 +414,9 @@ void AShipOcean::RunSurfaceCheck()
 				continue;
 			}
 			const double Measured = CheckHeightM - Depth / 100.0;
-			const double Dist = FVector2D(L.X - RenderedCenter.X, L.Y - RenderedCenter.Y).Size();
+			const double Dist = FVector2D(L.X - Center.X, L.Y - Center.Y).Size();
 			const double Fade = 1.0 - FMath::SmoothStep(FadeStartM, FadeEndM, Dist);
-			const double Want = Tide + (ElevationAt(L.X, L.Y, RenderedTime) - Tide) * Fade;
+			const double Want = Tide + (ElevationAt(L.X, L.Y, Time) - Tide) * Fade;
 			MaxErr = FMath::Max(MaxErr, FMath::Abs(Measured - Want));
 			MaxEta = FMath::Max(MaxEta, FMath::Abs(Want - Tide));
 		}
@@ -353,7 +427,7 @@ void AShipOcean::RunSurfaceCheck()
 	SurfaceMaxErr = FMath::Max(SurfaceMaxErr, MaxErr);
 	SurfaceMaxEta = FMath::Max(SurfaceMaxEta, MaxEta);
 	UE_LOG(LogShipOcean, Log, TEXT("SHIP_SEA surface check %d: t=%.3f s center (%.1f, %.1f) m, %d points, misses %lld, max err %.2e m (tol %.0e), max |eta| %.2f m"),
-		SurfaceChecks, RenderedTime, RenderedCenter.X, RenderedCenter.Y, CheckPixels * CheckPixels - static_cast<int32>(Misses), Misses, MaxErr, SurfaceTolM, MaxEta);
+		SurfaceChecks, Time, Center.X, Center.Y, CheckPixels * CheckPixels - static_cast<int32>(Misses), Misses, MaxErr, SurfaceTolM, MaxEta);
 }
 
 bool AShipOcean::RunParity(const FString& Path)

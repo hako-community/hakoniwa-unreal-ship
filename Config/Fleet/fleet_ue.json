@@ -143,6 +143,11 @@
             0.2,
             0.38,
             0.62
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -161,6 +166,11 @@
             0.45,
             0.45,
             0.45
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -179,6 +189,11 @@
             0.55,
             0.13,
             0.12
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -197,6 +212,11 @@
             0.35,
             0.12,
             0.1
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -215,6 +235,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -36.0,
+            0.0,
+            20.5
           ]
         },
         {
@@ -233,6 +258,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -34.5,
+            7.1,
+            14.5
           ]
         },
         {
@@ -251,6 +281,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -34.5,
+            -7.1,
+            14.5
           ]
         },
         {
@@ -269,6 +304,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -45.5,
+            0.0,
+            5.5
           ]
         },
         {
@@ -287,6 +327,11 @@
             0.92,
             0.92,
             0.9
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         }
       ],
@@ -424,6 +469,358 @@
           }
         }
       ],
+      "materials": {
+        "ship_deck": {
+          "base_color": [
+            0.3,
+            0.38,
+            0.32
+          ],
+          "metallic": 0.1,
+          "roughness": 0.75,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_0": {
+          "base_color": [
+            0.08,
+            0.22,
+            0.55
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_4": {
+          "base_color": [
+            0.55,
+            0.57,
+            0.6
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_1": {
+          "base_color": [
+            0.62,
+            0.13,
+            0.11
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_5": {
+          "base_color": [
+            0.88,
+            0.88,
+            0.86
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_3": {
+          "base_color": [
+            0.82,
+            0.4,
+            0.08
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_6": {
+          "base_color": [
+            0.42,
+            0.25,
+            0.15
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_2": {
+          "base_color": [
+            0.12,
+            0.42,
+            0.22
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_7": {
+          "base_color": [
+            0.05,
+            0.12,
+            0.3
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_railing": {
+          "base_color": [
+            0.85,
+            0.86,
+            0.86
+          ],
+          "metallic": 0.3,
+          "roughness": 0.4,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_hull_topside": {
+          "base_color": [
+            0.09,
+            0.17,
+            0.33
+          ],
+          "metallic": 0.2,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_safety_orange": {
+          "base_color": [
+            0.95,
+            0.4,
+            0.05
+          ],
+          "metallic": 0.0,
+          "roughness": 0.5,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_dark": {
+          "base_color": [
+            0.03,
+            0.03,
+            0.035
+          ],
+          "metallic": 0.0,
+          "roughness": 0.9,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_boot_top": {
+          "base_color": [
+            0.06,
+            0.06,
+            0.07
+          ],
+          "metallic": 0.1,
+          "roughness": 0.6,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_hull_bottom": {
+          "base_color": [
+            0.55,
+            0.12,
+            0.1
+          ],
+          "metallic": 0.1,
+          "roughness": 0.7,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_light_white": {
+          "base_color": [
+            1.0,
+            1.0,
+            0.95
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            10.0,
+            10.0,
+            9.5
+          ]
+        },
+        "ship_light_red": {
+          "base_color": [
+            1.0,
+            0.1,
+            0.1
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            8.0,
+            0.8,
+            0.8
+          ]
+        },
+        "ship_light_green": {
+          "base_color": [
+            0.1,
+            1.0,
+            0.2
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            0.8,
+            8.0,
+            1.6
+          ]
+        },
+        "ship_bronze": {
+          "base_color": [
+            0.72,
+            0.52,
+            0.25
+          ],
+          "metallic": 0.9,
+          "roughness": 0.25,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_superstructure": {
+          "base_color": [
+            0.9,
+            0.9,
+            0.88
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_steel": {
+          "base_color": [
+            0.55,
+            0.57,
+            0.6
+          ],
+          "metallic": 0.8,
+          "roughness": 0.35,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_glass": {
+          "base_color": [
+            0.06,
+            0.1,
+            0.14
+          ],
+          "metallic": 0.7,
+          "roughness": 0.08,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_funnel": {
+          "base_color": [
+            0.9,
+            0.9,
+            0.88
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_funnel_band": {
+          "base_color": [
+            0.08,
+            0.3,
+            0.6
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_funnel_top": {
+          "base_color": [
+            0.05,
+            0.05,
+            0.05
+          ],
+          "metallic": 0.0,
+          "roughness": 0.8,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
       "ais": {
         "has_ais": true,
         "mmsi": 431000001,
@@ -476,6 +873,11 @@
             0.2,
             0.38,
             0.62
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -494,6 +896,11 @@
             0.45,
             0.45,
             0.45
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -512,6 +919,11 @@
             0.55,
             0.13,
             0.12
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -530,6 +942,11 @@
             0.35,
             0.12,
             0.1
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -548,6 +965,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -49.0,
+            0.0,
+            28.1
           ]
         },
         {
@@ -566,6 +988,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -40.799999,
+            10.6,
+            18.4
           ]
         },
         {
@@ -584,6 +1011,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -40.799999,
+            -10.6,
+            18.4
           ]
         },
         {
@@ -602,6 +1034,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -65.199997,
+            0.0,
+            6.5
           ]
         },
         {
@@ -620,6 +1057,11 @@
             0.92,
             0.92,
             0.9
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         }
       ],
@@ -757,6 +1199,358 @@
           }
         }
       ],
+      "materials": {
+        "ship_deck": {
+          "base_color": [
+            0.33,
+            0.35,
+            0.36
+          ],
+          "metallic": 0.1,
+          "roughness": 0.75,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_0": {
+          "base_color": [
+            0.08,
+            0.22,
+            0.55
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_4": {
+          "base_color": [
+            0.55,
+            0.57,
+            0.6
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_1": {
+          "base_color": [
+            0.62,
+            0.13,
+            0.11
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_5": {
+          "base_color": [
+            0.88,
+            0.88,
+            0.86
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_2": {
+          "base_color": [
+            0.12,
+            0.42,
+            0.22
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_3": {
+          "base_color": [
+            0.82,
+            0.4,
+            0.08
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_6": {
+          "base_color": [
+            0.42,
+            0.25,
+            0.15
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_container_7": {
+          "base_color": [
+            0.05,
+            0.12,
+            0.3
+          ],
+          "metallic": 0.25,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_railing": {
+          "base_color": [
+            0.85,
+            0.86,
+            0.86
+          ],
+          "metallic": 0.3,
+          "roughness": 0.4,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_hull_topside": {
+          "base_color": [
+            0.45,
+            0.1,
+            0.09
+          ],
+          "metallic": 0.2,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_safety_orange": {
+          "base_color": [
+            0.95,
+            0.4,
+            0.05
+          ],
+          "metallic": 0.0,
+          "roughness": 0.5,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_dark": {
+          "base_color": [
+            0.03,
+            0.03,
+            0.035
+          ],
+          "metallic": 0.0,
+          "roughness": 0.9,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_boot_top": {
+          "base_color": [
+            0.05,
+            0.05,
+            0.06
+          ],
+          "metallic": 0.1,
+          "roughness": 0.6,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_hull_bottom": {
+          "base_color": [
+            0.2,
+            0.2,
+            0.22
+          ],
+          "metallic": 0.1,
+          "roughness": 0.7,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_light_white": {
+          "base_color": [
+            1.0,
+            1.0,
+            0.95
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            10.0,
+            10.0,
+            9.5
+          ]
+        },
+        "ship_light_red": {
+          "base_color": [
+            1.0,
+            0.1,
+            0.1
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            8.0,
+            0.8,
+            0.8
+          ]
+        },
+        "ship_light_green": {
+          "base_color": [
+            0.1,
+            1.0,
+            0.2
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            0.8,
+            8.0,
+            1.6
+          ]
+        },
+        "ship_bronze": {
+          "base_color": [
+            0.72,
+            0.52,
+            0.25
+          ],
+          "metallic": 0.9,
+          "roughness": 0.25,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_superstructure": {
+          "base_color": [
+            0.9,
+            0.9,
+            0.88
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_steel": {
+          "base_color": [
+            0.55,
+            0.57,
+            0.6
+          ],
+          "metallic": 0.8,
+          "roughness": 0.35,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_glass": {
+          "base_color": [
+            0.06,
+            0.1,
+            0.14
+          ],
+          "metallic": 0.7,
+          "roughness": 0.08,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_funnel": {
+          "base_color": [
+            0.9,
+            0.9,
+            0.88
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_funnel_band": {
+          "base_color": [
+            0.8,
+            0.55,
+            0.1
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_funnel_top": {
+          "base_color": [
+            0.05,
+            0.05,
+            0.05
+          ],
+          "metallic": 0.0,
+          "roughness": 0.8,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
       "ais": {
         "has_ais": true,
         "mmsi": 431000002,
@@ -808,6 +1602,11 @@
             0.45,
             0.45,
             0.45
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -826,6 +1625,11 @@
             0.55,
             0.13,
             0.12
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -844,6 +1648,11 @@
             0.35,
             0.12,
             0.1
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -862,6 +1671,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            8.0,
+            0.0,
+            17.4
           ]
         },
         {
@@ -880,6 +1694,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            9.7,
+            7.1,
+            10.8
           ]
         },
         {
@@ -898,6 +1717,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            9.7,
+            -7.1,
+            10.8
           ]
         },
         {
@@ -916,6 +1740,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -31.799999,
+            0.0,
+            3.3
           ]
         },
         {
@@ -934,6 +1763,11 @@
             0.92,
             0.92,
             0.9
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         }
       ],
@@ -1104,6 +1938,260 @@
           }
         }
       ],
+      "materials": {
+        "ship_railing": {
+          "base_color": [
+            0.85,
+            0.86,
+            0.86
+          ],
+          "metallic": 0.3,
+          "roughness": 0.4,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_hull_topside": {
+          "base_color": [
+            0.92,
+            0.93,
+            0.93
+          ],
+          "metallic": 0.2,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_safety_orange": {
+          "base_color": [
+            0.95,
+            0.4,
+            0.05
+          ],
+          "metallic": 0.0,
+          "roughness": 0.5,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_deck": {
+          "base_color": [
+            0.4,
+            0.45,
+            0.42
+          ],
+          "metallic": 0.1,
+          "roughness": 0.75,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_dark": {
+          "base_color": [
+            0.03,
+            0.03,
+            0.035
+          ],
+          "metallic": 0.0,
+          "roughness": 0.9,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_stripe": {
+          "base_color": [
+            0.1,
+            0.3,
+            0.65
+          ],
+          "metallic": 0.1,
+          "roughness": 0.5,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_boot_top": {
+          "base_color": [
+            0.1,
+            0.2,
+            0.45
+          ],
+          "metallic": 0.1,
+          "roughness": 0.6,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_hull_bottom": {
+          "base_color": [
+            0.55,
+            0.12,
+            0.1
+          ],
+          "metallic": 0.1,
+          "roughness": 0.7,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_steel": {
+          "base_color": [
+            0.55,
+            0.57,
+            0.6
+          ],
+          "metallic": 0.8,
+          "roughness": 0.35,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_light_white": {
+          "base_color": [
+            1.0,
+            1.0,
+            0.95
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            10.0,
+            10.0,
+            9.5
+          ]
+        },
+        "ship_light_red": {
+          "base_color": [
+            1.0,
+            0.1,
+            0.1
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            8.0,
+            0.8,
+            0.8
+          ]
+        },
+        "ship_light_green": {
+          "base_color": [
+            0.1,
+            1.0,
+            0.2
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            0.8,
+            8.0,
+            1.6
+          ]
+        },
+        "ship_bronze": {
+          "base_color": [
+            0.72,
+            0.52,
+            0.25
+          ],
+          "metallic": 0.9,
+          "roughness": 0.25,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_superstructure": {
+          "base_color": [
+            0.9,
+            0.9,
+            0.88
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_glass": {
+          "base_color": [
+            0.06,
+            0.1,
+            0.14
+          ],
+          "metallic": 0.7,
+          "roughness": 0.08,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_funnel": {
+          "base_color": [
+            0.92,
+            0.93,
+            0.93
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_funnel_band": {
+          "base_color": [
+            0.1,
+            0.3,
+            0.65
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_funnel_top": {
+          "base_color": [
+            0.05,
+            0.05,
+            0.05
+          ],
+          "metallic": 0.0,
+          "roughness": 0.8,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
       "ais": {
         "has_ais": true,
         "mmsi": 431000003,
@@ -1155,6 +2243,11 @@
             0.45,
             0.45,
             0.45
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -1173,6 +2266,11 @@
             0.55,
             0.13,
             0.12
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -1191,6 +2289,11 @@
             0.35,
             0.12,
             0.1
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         },
         {
@@ -1209,6 +2312,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            0.5,
+            0.0,
+            3.4
           ]
         },
         {
@@ -1227,6 +2335,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            0.5,
+            0.0,
+            4.6
           ]
         },
         {
@@ -1245,6 +2358,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            0.5,
+            0.0,
+            4.0
           ]
         },
         {
@@ -1263,6 +2381,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            0.8,
+            1.1,
+            2.5
           ]
         },
         {
@@ -1281,6 +2404,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            0.8,
+            -1.1,
+            2.5
           ]
         },
         {
@@ -1299,6 +2427,11 @@
             1.0,
             0.95,
             0.6
+          ],
+          "origin": [
+            -5.4,
+            0.0,
+            1.2
           ]
         },
         {
@@ -1317,6 +2450,11 @@
             0.92,
             0.92,
             0.9
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
           ]
         }
       ],
@@ -1388,6 +2526,218 @@
           }
         }
       ],
+      "materials": {
+        "ship_hull_topside": {
+          "base_color": [
+            0.93,
+            0.93,
+            0.92
+          ],
+          "metallic": 0.2,
+          "roughness": 0.55,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_railing": {
+          "base_color": [
+            0.85,
+            0.86,
+            0.86
+          ],
+          "metallic": 0.3,
+          "roughness": 0.4,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_deck": {
+          "base_color": [
+            0.55,
+            0.6,
+            0.62
+          ],
+          "metallic": 0.1,
+          "roughness": 0.75,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_stripe": {
+          "base_color": [
+            0.1,
+            0.3,
+            0.7
+          ],
+          "metallic": 0.1,
+          "roughness": 0.5,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_boot_top": {
+          "base_color": [
+            0.7,
+            0.12,
+            0.1
+          ],
+          "metallic": 0.1,
+          "roughness": 0.6,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_hull_bottom": {
+          "base_color": [
+            0.7,
+            0.12,
+            0.1
+          ],
+          "metallic": 0.1,
+          "roughness": 0.7,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_light_white": {
+          "base_color": [
+            1.0,
+            1.0,
+            0.95
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            10.0,
+            10.0,
+            9.5
+          ]
+        },
+        "ship_light_red": {
+          "base_color": [
+            1.0,
+            0.1,
+            0.1
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            8.0,
+            0.8,
+            0.8
+          ]
+        },
+        "ship_light_green": {
+          "base_color": [
+            0.1,
+            1.0,
+            0.2
+          ],
+          "metallic": 0.0,
+          "roughness": 0.1,
+          "emissive": [
+            0.8,
+            8.0,
+            1.6
+          ]
+        },
+        "ship_bronze": {
+          "base_color": [
+            0.72,
+            0.52,
+            0.25
+          ],
+          "metallic": 0.9,
+          "roughness": 0.25,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_steel": {
+          "base_color": [
+            0.55,
+            0.57,
+            0.6
+          ],
+          "metallic": 0.8,
+          "roughness": 0.35,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_superstructure": {
+          "base_color": [
+            0.94,
+            0.94,
+            0.93
+          ],
+          "metallic": 0.0,
+          "roughness": 0.45,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_glass": {
+          "base_color": [
+            0.06,
+            0.1,
+            0.14
+          ],
+          "metallic": 0.7,
+          "roughness": 0.08,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_dark": {
+          "base_color": [
+            0.03,
+            0.03,
+            0.035
+          ],
+          "metallic": 0.0,
+          "roughness": 0.9,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "ship_safety_orange": {
+          "base_color": [
+            0.95,
+            0.4,
+            0.05
+          ],
+          "metallic": 0.0,
+          "roughness": 0.5,
+          "emissive": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
       "ais": {
         "has_ais": false
       }

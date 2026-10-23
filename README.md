@@ -36,7 +36,7 @@ pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 終わり�
 ```
 
 * 船の一覧・PDU・形は Godot ビューアと同じ（`tools/gen_fleet_config.py` が `hakoniwa-godot-ship/config/fleet.json`・`pdu_config_ship.json`・`Models/*.glb`・`ship_sync.profile.json` から作る。手で写さない）。
-  関節の原点・回転軸は glb のノードとプロファイルから。Step 2 の形はメッシュごとの外形の箱（仮。Step 4 で glb に置き換える）。
+  関節の原点・回転軸は glb のノードとプロファイルから。形は Step 4 で glb のメッシュに（下）。
 * `AShipFleet`（地図に 1 つ）が船ごとに `AShipActor` を置く。`-ShipSync` で `AHakoniwaShmClient`（アセット名 `UnrealShipViewer`）を置いて登録し、`-ShipHakoStart` で開始を要求する。
   姿勢は D14・D18（`R = Rz(yaw)·Ry(−ang_y)·Rx(roll)`、Unreal へは S·R·S）、関節は `joint_states`、物理時刻は OwnShip の `joint_states` の stamp（D19）。
 * 検証（`run_plant_test.ps1`）：
@@ -75,6 +75,22 @@ pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 実物理�
   3. 結合テスト：波浪パラメータ、海面の時刻 = 船の表示時刻、船体の上下動と海面の相関（Godot と同じ閾値 0.8・水線 RMS 0.4 m）、
      表示時刻が止まったフレームの割合（5 % 以下）。物理の trace は表示時刻に同じ式で補間して照合する。
 
+## 船の形・露出・なめらかさ（Step 4）
+
+* **船の形**：Godot ビューアと同じ glb（`tools/gen_fleet_config.py` が `SourceArt/Ships/<model>.glb` に写し、`--check` で同じか確かめる）を、
+  場面づくり（`ship_scene.ps1 -Build`）が部品（メッシュのノード）ごとの StaticMesh（`/Game/Ship/Generated/Ships/<model>/SM_<node>`、Nanite）にする
+  （`Source/HakoniwaShipEditor/Private/ShipModelImport.cpp`）。エンジンの glTF 取り込みは使わず、座標は自分で移す：glTF → FLU（x = −Z, y = −X, z = Y、
+  `gen_fleet_config.py` と同じ）→ Unreal。三角形の表の向きが glb の法線と合うかを数える（4 隻 53,291 三角形で逆向き 0）。
+* `AShipActor` は部品の原点に StaticMesh を置き、材質の差し込み口（glb の材質名）に `fleet_ue.json` の `materials`（色・金属度・粗さ・発光、
+  Godot と同じ値）を入れる（`M_ShipPaint`、両面）。メッシュの外形を `fleet_ue.json` の外形の箱と比べる（`SHIP_MODEL ... max bounds err`、実測 2e-6 m）。
+  メッシュが無いとき（場面を作り直していない）は外形の箱を仮の形として置き、検証は失敗する。
+* **露出**：晴天の昼に固定（EV100 15.5、場面の `DaylightExposure`）。自動露出は暗い海に合わせて明るくしすぎ、紺の船体が水色に見えた。
+  `-ShipExposure=<EV100>` で上書きできる（調整用）。
+* **なめらかさ**：結合テストは、表示時刻が止まったフレーム（5 % 以下）、合わせ直し（0 回）、始まって 5 s 後からの 25 ms を超えたフレーム（2 回まで）を確かめる。
+  描いた海面の高さの検証は GPU の写しを数フレーム後に受け取る（同期で読むと 10 s ごとに 28 ms 止まった）。
+  ★ `ship_plant` は全船の `pos` を書いてから時刻つきの `joint_states` を書く。`pos` に時刻が無いので、`pos` → 時刻 →（時刻が届いたら）もう一度 `pos` の順に読む。
+* `-ShipFrameLog=<csv>`：フレームごとの壁時計・物理時刻・表示時刻（カクつきの調査用）。
+
 ## 場面（Step 1）
 
 | 要素 | 中身 |
@@ -88,7 +104,7 @@ pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 実物理�
 
 1. ~~Step 2：`AShipActor` に船の姿勢（D14・D18）と関節（`joint_states`）を反映する~~（済）
 2. ~~Step 3：海面を D4 の Gerstner 波で描く（時刻は D19）~~（済）
-3. Step 4：新しい glb（塗装・上部構造物つき）を取り込み、Godot 側と見た目をそろえる
+3. ~~Step 4：新しい glb（塗装・上部構造物つき）を取り込み、Godot 側と見た目をそろえる~~（済）
 
 ## ライセンス
 

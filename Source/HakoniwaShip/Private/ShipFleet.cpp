@@ -453,19 +453,20 @@ void AShipFleet::ApplyAt(FShipSync& S, double T)
 
 void AShipFleet::UpdateDisplayClock(double Dt)
 {
-	// 表示時刻：毎フレーム実時間で進め、最新の物理時刻 − DisplayDelay へゆっくり寄せる（±25 % の速さの調整）。
+	// 表示時刻：毎フレーム実時間で進め、最新の物理時刻 − DisplayDelay へ寄せる（速さの調整は遅らせる側 −25 %、追いつく側は最大 2 倍）。
 	// 物理は 50 Hz で、箱庭の許容遅延の範囲で間隔が揺れる。受信した時刻をそのまま使うと、描画（130〜200 FPS）が 2〜4 フレームごとに
-	// 飛ぶのでカクつく。最新の受信より先は描かない（届かないときは止まる）。0.5 s 以上ずれたら合わせ直す
+	// 飛ぶのでカクつく。最新の受信より先は描かない（届かないときは止まる）。2 s 以上ずれたときだけ合わせ直す（飛ぶ）。
+	// 起動直後など物理が先に進んだときは、飛ばずに早送りで追いつく（0.5 s で合わせ直していた版は起動直後に 6 回飛んだ）
 	const double Target = LastPhysicsTime - DisplayDelay;
 	const double Prev = DisplayTime;
-	if (DisplayTime < 0.0 || FMath::Abs(Target - DisplayTime) > 0.5)
+	if (DisplayTime < 0.0 || FMath::Abs(Target - DisplayTime) > 2.0)
 	{
 		if (DisplayTime >= 0.0) { ++ClockSnaps; }
 		DisplayTime = Target;
 	}
 	else
 	{
-		DisplayTime += Dt * (1.0 + FMath::Clamp((Target - DisplayTime) * 2.0, -0.25, 0.25));
+		DisplayTime += Dt * (1.0 + FMath::Clamp((Target - DisplayTime) * 2.0, -0.25, 1.0));
 	}
 	DisplayTime = FMath::Min(DisplayTime, LastPhysicsTime);
 	++DisplayFrames;
@@ -685,11 +686,21 @@ void AShipFleet::FinishCheck(double PhysicsTime)
 	if (PosErr > 1.0e-3) { Problems.Add(FString::Printf(TEXT("position/pivot error %.6f m > 1e-3"), PosErr)); }
 	if (AngErr > 1.0e-4) { Problems.Add(FString::Printf(TEXT("axis error %.3e > 1e-4"), AngErr)); }
 	if (JointErr > 1.0e-4) { Problems.Add(FString::Printf(TEXT("joint error %.3e rad > 1e-4"), JointErr)); }
+	// 船の形（Step 4）：glb のメッシュが置かれ、外形が fleet_ue.json の外形の箱と一致するか
+	for (const FShipSync& S : Sync)
+	{
+		if (S.Actor->BoxParts > 0 || S.Actor->MeshParts == 0) { Problems.Add(FString::Printf(TEXT("%s: %d placeholder boxes (run ship_scene.ps1 -Build)"), *S.Actor->Robot, S.Actor->BoxParts)); }
+		if (S.Actor->MaxBoundsErr > 1.0e-3) { Problems.Add(FString::Printf(TEXT("%s: mesh bounds err %.4f m"), *S.Actor->Robot, S.Actor->MaxBoundsErr)); }
+	}
 	CheckSea(Problems);
 	// 表示時刻のなめらかさ：止まったフレーム（新しい物理が届かない間）の割合
 	const double HoldRatio = DisplayFrames > 0 ? static_cast<double>(DisplayHolds) / DisplayFrames : 1.0;
-	UE_LOG(LogShipFleet, Log, TEXT("SHIP_VIEW display clock: %lld frames, held %lld (%.2f %%), resyncs %lld, delay %.3f s, max lag behind physics %.3f s"),
-		DisplayFrames, DisplayHolds, 100.0 * HoldRatio, ClockSnaps, DisplayDelay, DisplayLagMax);
+	const double HitchRatio = HitchFrames > 0 ? static_cast<double>(Hitches) / HitchFrames : 0.0;
+	UE_LOG(LogShipFleet, Log, TEXT("SHIP_VIEW display clock: %lld frames, held %lld (%.2f %%), resyncs %lld, delay %.3f s, max lag behind physics %.3f s, frames > 25 ms %lld / %lld"),
+		DisplayFrames, DisplayHolds, 100.0 * HoldRatio, ClockSnaps, DisplayDelay, DisplayLagMax, Hitches, HitchFrames);
+	// 見えるカクつき：同期の読み出しをしていた版は 10 s ごとに 28 ms（60 s で 5 回）。OS の揺れを見込んで 2 回まで
+	if (Hitches > 2) { Problems.Add(FString::Printf(TEXT("%lld frames > 25 ms (%.2f %%)"), Hitches, 100.0 * HitchRatio)); }
+	if (ClockSnaps > 0) { Problems.Add(FString::Printf(TEXT("display clock jumped %lld times"), ClockSnaps)); }
 	if (HoldRatio > 0.05) { Problems.Add(FString::Printf(TEXT("display clock held in %.1f %% of frames (not smooth)"), 100.0 * HoldRatio)); }
 	if (!SamplesPath.IsEmpty())
 	{
@@ -785,7 +796,8 @@ void AShipFleet::Tick(float DeltaSeconds)
 	// ★ PduManager::ReadPduRawData は受信した PDU を 1 回だけ返す（CommunicationBuffer::GetBuffer が取り出して消す）。
 	//   新しい値が無いフレームは読めない。受信した値は物理時刻つきの履歴に積み、描くのは表示時刻（UpdateDisplayClock）の補間値
 	//   ship_plant は 1 ステップで全船の pos を書いてから、時刻（stamp）つきの joint_states を書く。pos には時刻が無いので、
-	//   先に全船の pos を読み、そのあと時刻を読む。新しい時刻が届くまでに読めた pos はその時刻のもの（届かなければ次の時刻まで待たせる）
+	//   先に全船の pos を読み、そのあと時刻を読む。時刻が届いたら pos をもう一度読む（pos を読んだあと・時刻を読む前に PLANT が
+	//   次のステップを書いた場合、その pos はもう書かれている）。時刻が届くまでに読めた pos はその時刻のもの（届かなければ次の時刻まで待たせる）
 	double Stamp = -1.0;
 	for (FShipSync& S : Sync)
 	{
@@ -797,6 +809,13 @@ void AShipFleet::Tick(float DeltaSeconds)
 		if (ReadJoints(Pdu, S, St) && S.Actor->Robot == ClockRobot && S.JointPdu == ClockPdu)
 		{
 			Stamp = St;
+		}
+	}
+	if (Stamp >= 0.0)
+	{
+		for (FShipSync& S : Sync)
+		{
+			ReadPose(Pdu, S);
 		}
 	}
 	ReadDisturbance(Pdu);
@@ -821,6 +840,7 @@ void AShipFleet::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	// 物理が詰まって同じ時刻で書き直したとき（Stamp == LastPhysicsTime）も、読めた pos はその時刻のもの（次の時刻へ持ち越さない）
 	if (Stamp >= 0.0 && Stamp == LastPhysicsTime)
 	{
 		for (FShipSync& S : Sync)
@@ -829,6 +849,11 @@ void AShipFleet::Tick(float DeltaSeconds)
 		}
 	}
 	UpdateDisplayClock(DeltaSeconds);
+	if (FirstDisplayTime >= 0.0 && DisplayTime > FirstDisplayTime + 5.0)
+	{
+		++HitchFrames;
+		Hitches += DeltaSeconds > 0.025f ? 1 : 0;
+	}
 	if (FirstDisplayTime < 0.0)
 	{
 		FirstDisplayTime = DisplayTime;

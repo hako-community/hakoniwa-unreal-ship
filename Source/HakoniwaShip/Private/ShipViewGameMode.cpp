@@ -7,6 +7,8 @@
 #include "HAL/PlatformTime.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "EngineUtils.h"
+#include "Engine/PostProcessVolume.h"
 #include "Misc/Paths.h"
 #include "UnrealClient.h"
 
@@ -35,6 +37,19 @@ void AShipViewGameMode::PostLogin(APlayerController* NewPlayer)
 void AShipViewGameMode::StartPlay()
 {
 	Super::StartPlay();
+	float Ev = 0.0f;
+	if (FParse::Value(FCommandLine::Get(), TEXT("-ShipExposure="), Ev))
+	{
+		// 露出の調整用：場面の DaylightExposure（無限の範囲のポストプロセス）の EV100 を上書きする
+		for (TActorIterator<APostProcessVolume> It(GetWorld()); It; ++It)
+		{
+			It->Settings.bOverride_AutoExposureMinBrightness = true;
+			It->Settings.bOverride_AutoExposureMaxBrightness = true;
+			It->Settings.AutoExposureMinBrightness = Ev;
+			It->Settings.AutoExposureMaxBrightness = Ev;
+		}
+		UE_LOG(LogShipView, Log, TEXT("exposure EV100 = %.2f"), Ev);
+	}
 	float Sec = 0.0f;
 	if (FParse::Value(FCommandLine::Get(), TEXT("-ShipSmoke="), Sec) && Sec > 0.0f)
 	{

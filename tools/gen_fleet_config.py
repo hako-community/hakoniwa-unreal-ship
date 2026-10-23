@@ -12,9 +12,12 @@
 出力（コミット対象）:
   Config/Fleet/fleet_ue.json
   Source/HakoniwaShip/Public/ThirdParty/wave_spectrum.hpp（物理の wave_spectrum.hpp の写し。内容は変えない）
+  SourceArt/Ships/<model>.glb（Godot ビューアの glb の写し。場面づくり（ship_scene.ps1 -Build）が部品ごとの StaticMesh にする、Step 4）
   座標はすべて FLU（右手系 m、x 前・y 左・z 上）。glb（glTF、Y 上）からは x = -Z, y = -X, z = +Y で戻す
   （Godot の hakoniwa_robot_sync の x→-Z, y→-X, z→+Y の逆）。Unreal への写像は ShipFrame.h。
-  parts は Step 2 の仮の形（メッシュごとの外形の箱）。Step 4 で glb の取り込みに置き換える。
+  parts / joints[].part は glb のメッシュのノード。origin はノードの原点（FLU）、box_min / box_max は外形の箱
+  （船体の座標。関節の部品は関節の原点からの相対）。Unreal は glb から作った StaticMesh を置き、外形がこの箱と一致するか確かめる
+  （メッシュが無いときは箱を仮の形として置く）。materials は glb の材質（色・金属度・粗さ・発光、Godot と同じ値）。
 
 usage: py -3.12 tools/gen_fleet_config.py [--check]
 """
@@ -30,6 +33,7 @@ GODOT = SHIPNAVI / "hakoniwa-godot-ship"
 OUT = PROJECT / "Config" / "Fleet" / "fleet_ue.json"
 WAVE_SRC = SHIPNAVI / "hakoniwa-mujoco-ship" / "include" / "ship" / "environment" / "wave_spectrum.hpp"
 WAVE_OUT = PROJECT / "Source" / "HakoniwaShip" / "Public" / "ThirdParty" / "wave_spectrum.hpp"
+GLB_OUT = PROJECT / "SourceArt" / "Ships"
 PLANT_EXPECTED = GODOT / "tests" / "integration" / "plant_coupling" / "expected.json"
 # 物理プラグイン（ship_hydro_plugin.cpp の update_wave_engine_if_needed）と同じ成分数・有効化の閾値
 WAVE_COMPONENTS = 32
@@ -75,7 +79,7 @@ def gltf_to_flu(v):
 
 
 def r6(v):
-    return [round(float(x), 6) for x in v]
+    return [round(float(x), 6) + 0.0 for x in v]   # -0.0 を 0.0 に
 
 
 def mesh_bounds_gltf(g: dict, mesh_index: int):
@@ -102,6 +106,21 @@ def part_color(name: str):
         if name.startswith(prefix):
             return color
     return [0.6, 0.6, 0.6]
+
+
+def materials(g: dict) -> dict:
+    """glb の材質（glTF の色は線形）。発光は emissiveFactor × KHR_materials_emissive_strength（Godot の glTF 取り込みと同じ）"""
+    out = {}
+    for m in g.get("materials", []):
+        pbr = m.get("pbrMetallicRoughness", {})
+        strength = m.get("extensions", {}).get("KHR_materials_emissive_strength", {}).get("emissiveStrength", 1.0)
+        out[m["name"]] = {
+            "base_color": r6(pbr.get("baseColorFactor", [1.0, 1.0, 1.0, 1.0])[:3]),
+            "metallic": round(float(pbr.get("metallicFactor", 1.0)), 6),
+            "roughness": round(float(pbr.get("roughnessFactor", 1.0)), 6),
+            "emissive": r6([c * strength for c in m.get("emissiveFactor", [0.0, 0.0, 0.0])]),
+        }
+    return out
 
 
 def build_ship(ship: dict) -> dict:
@@ -133,6 +152,8 @@ def build_ship(ship: dict) -> dict:
         # 関節の部品は関節の原点からの相対、それ以外は船体の座標
         bmin, bmax = box_flu(lo, hi, [0.0, 0.0, 0.0] if is_joint else t)
         part = {"node": name, "box_min": r6(bmin), "box_max": r6(bmax), "color": part_color(name)}
+        if not is_joint:
+            part["origin"] = r6(gltf_to_flu(t))
         if is_joint:
             j = joint_nodes[name]
             if j["axis"] not in AXIS_FLU:
@@ -159,6 +180,7 @@ def build_ship(ship: dict) -> dict:
         "extent": {"min": r6(lo_all), "max": r6(hi_all)},
         "parts": parts,
         "joints": joints,
+        "materials": materials(g),
         "ais": ship.get("ais", {}),
     }
     if ship.get("joint_states_pdu"):
@@ -226,9 +248,13 @@ def main() -> int:
     a = ap.parse_args()
     text = json.dumps(build(), ensure_ascii=False, indent=2) + "\n"
     wave = WAVE_SRC.read_bytes()
+    models = sorted({s["model"] for s in load_json(GODOT / "config" / "fleet.json")["ships"]})
+    glbs = {GLB_OUT / f"{m}.glb": (GODOT / "Models" / m / f"{m}.glb").read_bytes() for m in models}
     if a.check:
-        stale = [str(f) for f, ok in ((OUT, OUT.exists() and OUT.read_text(encoding="utf-8") == text),
-                                      (WAVE_OUT, WAVE_OUT.exists() and WAVE_OUT.read_bytes() == wave)) if not ok]
+        pairs = [(OUT, OUT.exists() and OUT.read_text(encoding="utf-8") == text),
+                 (WAVE_OUT, WAVE_OUT.exists() and WAVE_OUT.read_bytes() == wave)]
+        pairs += [(f, f.exists() and f.read_bytes() == b) for f, b in glbs.items()]
+        stale = [str(f) for f, ok in pairs if not ok]
         if stale:
             print(f"FLEET_CONFIG_STALE {' '.join(stale)}")
             return 1
@@ -238,6 +264,9 @@ def main() -> int:
     OUT.write_text(text, encoding="utf-8")
     WAVE_OUT.parent.mkdir(parents=True, exist_ok=True)
     WAVE_OUT.write_bytes(wave)
+    GLB_OUT.mkdir(parents=True, exist_ok=True)
+    for f, b in glbs.items():
+        f.write_bytes(b)
     print(f"wrote {OUT}, {WAVE_OUT}")
     return 0
 
