@@ -51,8 +51,11 @@ public:
 	/** 1 で Gerstner の水平変位（波頭が尖るが物理の標高とは一致しなくなる。見た目用）。既定 0 */
 	UPROPERTY(EditAnywhere, Category = "Ocean") float HorizontalDisplacement = 0.0f;
 	/** 細かい波（見た目だけ）の数と強さ（傾きの倍率） */
-	UPROPERTY(EditAnywhere, Category = "Ocean") int32 RippleCount = 16;
+	UPROPERTY(EditAnywhere, Category = "Ocean") int32 RippleCount = 40;
 	UPROPERTY(EditAnywhere, Category = "Ocean") float RippleStrength = 1.0f;
+	/** 頂点に入れる波の波長の下限（格子の間隔の倍数）。この範囲で 0→1。短い波は画素の法線だけで描く */
+	UPROPERTY(EditAnywhere, Category = "Ocean") double VertexMinWavelengthCells = 3.0;
+	UPROPERTY(EditAnywhere, Category = "Ocean") double VertexFullWavelengthCells = 5.0;
 
 	/** 物理プラグインと同じ規則の成分数・有効化の閾値（fleet_ue.json の wave） */
 	void Configure(int32 NumComponents, double ActiveHs);
@@ -67,6 +70,10 @@ public:
 	double GetTime() const { return TimeSec; }
 	/** 物理と同じ CPU 倍精度の標高 [m]（ENU）。波浪が無効なら潮位 */
 	double ElevationAt(double East, double North, double T) const;
+	/** 描く海面（頂点）の高さ：物理の成分を頂点の重みで足したもの（格子で表せない短い波を除く） */
+	double MeshElevationAt(double East, double North, double T) const;
+	/** 成分の頂点の重み（波数 k [rad/m]） */
+	double VertexWeight(double K) const;
 
 	/** 次の Tick の始めに、描いた海面の高さを真上から読んで CPU の値と比べる */
 	void RequestSurfaceCheck() { bSurfaceCheckRequested = true; }
@@ -74,6 +81,7 @@ public:
 	int64 SurfacePoints = 0;
 	int64 SurfaceMisses = 0;      // 海面が写らなかった画素
 	double SurfaceMaxErr = 0.0;   // [m]
+	double SurfaceMaxShort = 0.0; // 頂点から除いた短い波の高さの最大 [m]（法線だけで描く分。物理の波面との差）
 	double SurfaceMaxEta = 0.0;   // 比べた点の |η| の最大 [m]（波が描かれていることの確認）
 
 private:

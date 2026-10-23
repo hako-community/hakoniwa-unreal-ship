@@ -95,8 +95,8 @@ void AShipOcean::EndPlay(const EEndPlayReason::Type Reason)
 {
 	if (SurfaceChecks > 0)
 	{
-		UE_LOG(LogShipOcean, Log, TEXT("SHIP_SEA surface summary: checks %d points %lld misses %lld max err %.2e m (max |eta| %.2f m)"),
-			SurfaceChecks, SurfacePoints, SurfaceMisses, SurfaceMaxErr, SurfaceMaxEta);
+		UE_LOG(LogShipOcean, Log, TEXT("SHIP_SEA surface summary: checks %d points %lld misses %lld max err %.2e m (max |eta| %.2f m, short waves left to normals %.3f m)"),
+			SurfaceChecks, SurfacePoints, SurfaceMisses, SurfaceMaxErr, SurfaceMaxEta, SurfaceMaxShort);
 	}
 	Super::EndPlay(Reason);
 }
@@ -120,19 +120,21 @@ void AShipOcean::SetWaveParams(const ShipWave::FParams& P)
 	bActive = Params.hs_m > ActiveHs;
 	Engine.initialize(Params);
 
-	// 見た目だけの細かい波：波長 0.8〜8 m、主波向 ±72°、傾き（k·a）0.05。決まった種で作る（毎回同じ見た目）
+	// 見た目だけの細かい波：波長 0.6〜20 m（対数で一様な乱数）、主波向 ±90°、傾き（k·a）0.035。決まった種で作る（毎回同じ見た目）。
+	// 物理の成分（数十本の正弦波、±45°）だけだと、短い波の多い海況（Tp 5 s など）で規則的な升目の干渉模様が見える。
+	// 波長・向きのそろわない細かい波を法線にだけ足して模様を崩す（高さは物理の波面のまま）
 	Ripples.Reset();
 	FRandomStream Rng(20261023);
 	const int32 NR = FMath::Clamp(RippleCount, 0, ShipOceanShader::MaxRipples);
 	for (int32 j = 0; j < NR; ++j)
 	{
-		const double L = 0.8 * FMath::Pow(10.0, static_cast<double>(j) / FMath::Max(1, NR - 1));
+		const double L = 0.6 * FMath::Pow(20.0 / 0.6, static_cast<double>(Rng.FRand()));
 		const double K = 2.0 * UE_DOUBLE_PI / L;
-		const double Dir = Params.wave_dir_rad + (Rng.FRand() - 0.5) * 0.8 * UE_DOUBLE_PI;
+		const double Dir = Params.wave_dir_rad + (Rng.FRand() - 0.5) * UE_DOUBLE_PI;
 		FRipple R;
 		R.Kx = K * FMath::Cos(Dir);
 		R.Ky = K * FMath::Sin(Dir);
-		R.Amp = 0.05 / K;
+		R.Amp = 0.035 / K;
 		R.Omega = FMath::Sqrt(ship::environment::GRAVITY * K);
 		R.Phase = Rng.FRand() * 2.0 * UE_DOUBLE_PI;
 		Ripples.Add(R);
@@ -151,6 +153,28 @@ void AShipOcean::SetPhysicsTime(double T)
 double AShipOcean::ElevationAt(double East, double North, double T) const
 {
 	return bActive ? Engine.get_elevation(East, North, T) : Params.tide_level_m;
+}
+
+double AShipOcean::VertexWeight(double K) const
+{
+	const double L = K > 1e-9 ? 2.0 * UE_DOUBLE_PI / K : 1e9;
+	return FMath::SmoothStep(VertexMinWavelengthCells * StepM, VertexFullWavelengthCells * StepM, L);
+}
+
+double AShipOcean::MeshElevationAt(double East, double North, double T) const
+{
+	if (!bActive)
+	{
+		return Params.tide_level_m;
+	}
+	double Eta = Params.tide_level_m;
+	const auto& Comps = Engine.get_components();
+	for (int32 i = 0; i < ComponentCount(); ++i)
+	{
+		const auto& C = Comps[i];
+		Eta += VertexWeight(C.k) * C.amp * FMath::Cos(C.kx * East + C.ky * North - C.omega * T + C.phase);
+	}
+	return Eta;
 }
 
 void AShipOcean::CreateWaveTexture()
@@ -270,7 +294,7 @@ void AShipOcean::UpdateGpu()
 		const auto& C = Comps[i];
 		const double Q = C.k > 1e-9 ? C.choppiness * C.amp / C.k : 0.0;
 		(*Data)[i] = FLinearColor(C.kx, C.ky, C.amp, Q);
-		(*Data)[TexWidth + i] = FLinearColor(Wrap2Pi(C.phase - C.omega * T + C.kx * CE + C.ky * CN), 0.0f, 0.0f, 0.0f);
+		(*Data)[TexWidth + i] = FLinearColor(Wrap2Pi(C.phase - C.omega * T + C.kx * CE + C.ky * CN), VertexWeight(C.k), 0.0f, 0.0f);
 	}
 	for (int32 j = 0; j < Ripples.Num(); ++j)
 	{
@@ -398,7 +422,7 @@ void AShipOcean::FinishSurfaceCheck(const TArray<FLinearColor>& Px, const FVecto
 {
 	const double S = StepM * 100.0;
 	const double Tide = Params.tide_level_m;
-	double MaxErr = 0.0, MaxEta = 0.0;
+	double MaxErr = 0.0, MaxEta = 0.0, MaxShort = 0.0;
 	int64 Misses = 0;
 	for (int32 py = 0; py < CheckPixels; ++py)
 	{
@@ -416,7 +440,9 @@ void AShipOcean::FinishSurfaceCheck(const TArray<FLinearColor>& Px, const FVecto
 			const double Measured = CheckHeightM - Depth / 100.0;
 			const double Dist = FVector2D(L.X - Center.X, L.Y - Center.Y).Size();
 			const double Fade = 1.0 - FMath::SmoothStep(FadeStartM, FadeEndM, Dist);
-			const double Want = Tide + (ElevationAt(L.X, L.Y, Time) - Tide) * Fade;
+			// 頂点は格子で表せない短い波を除いた高さ（MeshElevationAt）。除いた分（物理の波面との差）は別に数える
+			const double Want = Tide + (MeshElevationAt(L.X, L.Y, Time) - Tide) * Fade;
+			MaxShort = FMath::Max(MaxShort, FMath::Abs(ElevationAt(L.X, L.Y, Time) - MeshElevationAt(L.X, L.Y, Time)) * Fade);
 			MaxErr = FMath::Max(MaxErr, FMath::Abs(Measured - Want));
 			MaxEta = FMath::Max(MaxEta, FMath::Abs(Want - Tide));
 		}
@@ -426,8 +452,9 @@ void AShipOcean::FinishSurfaceCheck(const TArray<FLinearColor>& Px, const FVecto
 	SurfaceMisses += Misses;
 	SurfaceMaxErr = FMath::Max(SurfaceMaxErr, MaxErr);
 	SurfaceMaxEta = FMath::Max(SurfaceMaxEta, MaxEta);
-	UE_LOG(LogShipOcean, Log, TEXT("SHIP_SEA surface check %d: t=%.3f s center (%.1f, %.1f) m, %d points, misses %lld, max err %.2e m (tol %.0e), max |eta| %.2f m"),
-		SurfaceChecks, Time, Center.X, Center.Y, CheckPixels * CheckPixels - static_cast<int32>(Misses), Misses, MaxErr, SurfaceTolM, MaxEta);
+	SurfaceMaxShort = FMath::Max(SurfaceMaxShort, MaxShort);
+	UE_LOG(LogShipOcean, Log, TEXT("SHIP_SEA surface check %d: t=%.3f s center (%.1f, %.1f) m, %d points, misses %lld, max err %.2e m (tol %.0e), max |eta| %.2f m, short waves left to normals %.3f m"),
+		SurfaceChecks, Time, Center.X, Center.Y, CheckPixels * CheckPixels - static_cast<int32>(Misses), Misses, MaxErr, SurfaceTolM, MaxEta, MaxShort);
 }
 
 bool AShipOcean::RunParity(const FString& Path)

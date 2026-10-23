@@ -168,7 +168,7 @@
     {
       "robot": "OwnShip",
       "pdu": "autonomy_status",
-      "type": "geometry_msgs/Twist",
+      "type": "std_msgs/String",
       "channel_id": 50,
       "pdu_size": 256
     },

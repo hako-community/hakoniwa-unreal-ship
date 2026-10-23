@@ -146,10 +146,22 @@ void AShipHud::DrawNavPanel(AShipFleet* F, float X, float Y, float W)
 	int32 Risks = 0;
 	for (const ShipNav::FTarget& T : F->Targets) { Risks += T.Cpa.collision_risk ? 1 : 0; }
 	Text(FString::Printf(TEXT("TARGETS %d   COLLISION RISK %d"), F->Targets.Num(), Risks), X + 10, Ty, Risks > 0 ? Red : White); Ty += Line;
-	const FString Auto = F->AutonomyFrames > 0
-		? FString::Printf(TEXT("AUTONOMY  receiving ch 50 (%lld, last %.1f s; format TBD)"), F->AutonomyFrames, F->AutonomyLastT)
-		: FString(TEXT("AUTONOMY  no data (ch 50 autonomy_status)"));
-	Text(Auto, X + 10, Ty, F->AutonomyFrames > 0 ? Green : Dim);
+	// 自動化レベル（ch 50、D29）：AL・ODD 余裕度・航行状態・指令針路/速力。1 s 以上届かなければ古いと示す
+	if (F->AutonomyFrames > 0 && F->AutonomyLevel > 0)
+	{
+		const bool bStale = F->ViewTime - F->AutonomyLastT > 1.0;
+		const FLinearColor C = bStale ? Dim : (F->AutonomyLevel >= 4 ? Green : (F->AutonomyLevel == 3 ? Yellow : Red));
+		FString Cmd = F->AutonomyCourseDeg >= 0.0 ? FString::Printf(TEXT("  CMD %s %.1f kn"), *Deg3(F->AutonomyCourseDeg), F->AutonomySpeedKt) : FString();
+		Text(FString::Printf(TEXT("AUTONOMY AL%d  ODD %.2f  %s%s%s%s"), F->AutonomyLevel, F->AutonomyOddMargin, *F->AutonomyNav, *Cmd,
+			F->bAutonomyMrs ? TEXT("  MRS") : TEXT(""), bStale ? TEXT("  (stale)") : TEXT("")), X + 10, Ty, C);
+	}
+	else
+	{
+		const FString Auto = F->AutonomyFrames > 0
+			? FString::Printf(TEXT("AUTONOMY  unreadable ch 50 (%lld)"), F->AutonomyFrames)
+			: FString(TEXT("AUTONOMY  no data (ch 50 autonomy_status)"));
+		Text(Auto, X + 10, Ty, F->AutonomyFrames > 0 ? Yellow : Dim);
+	}
 }
 
 void AShipHud::DrawHeadingTape(AShipFleet* F)

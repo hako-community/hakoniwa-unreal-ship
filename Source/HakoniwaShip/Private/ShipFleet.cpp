@@ -42,6 +42,7 @@
 #undef hako_convert_pdu2cpp_array_string_varray
 #undef hako_convert_cpp2pdu_array_string_varray
 #include "hako_msgs/pdu_cpptype_conv_Disturbance.hpp"
+#include "std_msgs/pdu_cpptype_conv_String.hpp"
 
 DEFINE_LOG_CATEGORY_STATIC(LogShipFleet, Log, All);
 
@@ -703,8 +704,8 @@ void AShipFleet::CheckSea(TArray<FString>& Problems)
 		if (Rms > WaterlineRmsMax) { Problems.Add(FString::Printf(TEXT("%s: waterline rms %.3f m"), *S.Actor->Robot, Rms)); }
 	}
 	// 4. 描いた海面の高さ（AShipOcean の真上からの検証）
-	UE_LOG(LogShipFleet, Log, TEXT("SHIP_SEA surface: %d checks, %lld points, misses %lld, max err %.2e m, max |eta| %.2f m"),
-		Ocean->SurfaceChecks, Ocean->SurfacePoints, Ocean->SurfaceMisses, Ocean->SurfaceMaxErr, Ocean->SurfaceMaxEta);
+	UE_LOG(LogShipFleet, Log, TEXT("SHIP_SEA surface: %d checks, %lld points, misses %lld, max err %.2e m, max |eta| %.2f m, short waves left to normals %.3f m"),
+		Ocean->SurfaceChecks, Ocean->SurfacePoints, Ocean->SurfaceMisses, Ocean->SurfaceMaxErr, Ocean->SurfaceMaxEta, Ocean->SurfaceMaxShort);
 	if (Ocean->SurfaceChecks < 3) { Problems.Add(FString::Printf(TEXT("too few surface checks: %d"), Ocean->SurfaceChecks)); }
 	if (Ocean->SurfaceMisses > 0) { Problems.Add(FString::Printf(TEXT("surface not drawn at %lld points"), Ocean->SurfaceMisses)); }
 	if (Ocean->SurfaceMaxErr > 5.0e-3) { Problems.Add(FString::Printf(TEXT("drawn surface differs from the physics wave: %.2e m"), Ocean->SurfaceMaxErr)); }
@@ -1216,9 +1217,12 @@ void AShipFleet::Tick(float DeltaSeconds)
 	{
 		return;
 	}
-	if (bHakoStart && !bStartRequested)
+	// 開始の前に描画を落ち着かせる：起動直後は読み込み・シェーダの準備で数秒重いフレームが続き、その間に始めると物理が先へ進み、
+	// 表示時刻が 2 倍速で追いかける（海の動きが不自然に速く・止まって見える。SHP-26 のデモで最大 1.8 s 遅れた）
+	WarmFrames = DeltaSeconds < 0.025f ? WarmFrames + 1 : 0;
+	if (bHakoStart && !bStartRequested && WarmFrames >= 120)
 	{
-		// Godot ビューアの request_start と同じ：登録と宣言が済んだら開始を要求する（conductor と PLANT は先に動いている前提）
+		// Godot ビューアの request_start と同じ：登録と宣言が済み、25 ms 未満のフレームが 120 続いたら開始を要求する（conductor と PLANT は先に動いている前提）
 		bStartRequested = true;
 		if (AActor* Client = FindClient())
 		{
@@ -1254,8 +1258,28 @@ void AShipFleet::Tick(float DeltaSeconds)
 	ReadDisturbance(Pdu);
 	if (!AutonomyPdu.IsEmpty() && Pdu->ReadPduRawData(ViewShips.Num() > 0 ? ViewShips[0].Robot : FString(), AutonomyPdu, Buf) && Buf.Num() > 0)
 	{
-		++AutonomyFrames;   // 中身の形式は未定（K11）。受け取ったことだけを FOC に出す
+		// std_msgs/String の JSON（D29）。読めない中身は数えるだけ
+		++AutonomyFrames;
 		AutonomyLastT = LastPhysicsTime;
+		HakoCpp_String Str;
+		hako::pdu::PduConvertor<HakoCpp_String, hako::pdu::msgs::std_msgs::String> Conv;
+		TSharedPtr<FJsonObject> J;
+		if (Conv.pdu2cpp(reinterpret_cast<char*>(Buf.GetData()), Str)
+			&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(UTF8_TO_TCHAR(Str.data.c_str())), J) && J.IsValid())
+		{
+			double V = 0.0;
+			AutonomyLevel = J->TryGetNumberField(TEXT("al"), V) ? static_cast<int32>(V) : 0;
+			AutonomyOddMargin = J->TryGetNumberField(TEXT("odd"), V) ? V : -1.0;
+			AutonomyCourseDeg = J->TryGetNumberField(TEXT("crs"), V) ? V : -1.0;
+			AutonomySpeedKt = J->TryGetNumberField(TEXT("spd"), V) ? V : -1.0;
+			AutonomyThreat = J->TryGetNumberField(TEXT("tgt"), V) ? static_cast<int32>(V) : 0;
+			bAutonomyMrs = false;
+			J->TryGetBoolField(TEXT("mrs"), bAutonomyMrs);
+			AutonomyReason.Reset();
+			J->TryGetStringField(TEXT("reason"), AutonomyReason);
+			AutonomyNav.Reset();
+			J->TryGetStringField(TEXT("nav"), AutonomyNav);
+		}
 	}
 	if (Stamp < 0.0)
 	{

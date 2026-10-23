@@ -3,7 +3,9 @@
 // 式は wave_spectrum.hpp の get_surface() と同じ（Godot の Shaders/wave_common.gdshaderinc と同じ形）。
 //
 // 波の表（AShipOcean が毎フレーム書く浮動小数のテクスチャ WaveTex、幅 ShipOceanShader::TexWidth・高さ 2）:
-//   列 i < WaveCount（物理の成分）            行 0 = (kx, ky, amp, Q·amp/k)、行 1 = (位相, 0, 0, 0)
+//   列 i < WaveCount（物理の成分）            行 0 = (kx, ky, amp, Q·amp/k)、行 1 = (位相, 頂点の重み, 0, 0)
+//     頂点の重み：波長が格子の 3〜5 倍で 0→1（格子で表せない短い波を頂点に入れると、網目の升目の模様（エイリアス）になる。
+//     その波は画素の法線だけで描く）。AShipOcean::MeshElevationAt が同じ重みで高さを出す（描いた海面の検証）
 //   列 MaxWaves + j（j < RippleCount、見た目だけの細かい波） 行 0 = (kx, ky, amp, 0)、行 1 = (位相, 0, 0, 0)
 //   位相 = phase − ω·t + kx·cE + ky·cN（mod 2π）を CPU が倍精度で畳み込む（cE, cN はメッシュの中心の ENU、t は物理時刻）。
 //   シェーダは中心からの相対座標だけを単精度で扱う（Godot の shader_phases と同じ）。
@@ -17,10 +19,11 @@
 namespace ShipOceanShader
 {
 	constexpr int32 MaxWaves = 64;
-	constexpr int32 MaxRipples = 16;
+	constexpr int32 MaxRipples = 48;
 	constexpr int32 TexWidth = MaxWaves + MaxRipples;
 
-	/** 頂点：世界の変位 [cm]（WorldPositionOffset）。物理の成分だけ。HorizDisp = 0 なら上下だけで、物理の η(x, y, t) と同じ点で同じ高さ */
+	/** 頂点：世界の変位 [cm]（WorldPositionOffset）。物理の成分を頂点の重みで足す。HorizDisp = 0 なら上下だけで、
+	 *  格子で表せる波（波長が格子の 5 倍以上）は物理の η(x, y, t) と同じ点で同じ高さ */
 	inline const TCHAR* WpoCode()
 	{
 		return TEXT(R"(
@@ -31,10 +34,11 @@ int n = (int)WaveCount;
 for (int i = 0; i < n; i++)
 {
 	float4 c = WaveTex.Load(int3(i, 0, 0));
-	float a = c.x * d.x + c.y * d.y + WaveTex.Load(int3(i, 1, 0)).x;
+	float4 p = WaveTex.Load(int3(i, 1, 0));
+	float a = c.x * d.x + c.y * d.y + p.x;
 	float sa = sin(a);
-	eta += c.z * cos(a);
-	disp -= c.w * c.xy * sa;
+	eta += p.y * c.z * cos(a);
+	disp -= p.y * c.w * c.xy * sa;
 }
 float fade = 1.0 - smoothstep(FadeStart, FadeEnd, length(d));
 eta *= fade;
@@ -45,8 +49,10 @@ return float3(disp.x, -disp.y, eta + Tide) * 100.0;
 
 	/** 画素：xyz = Unreal の世界の法線、w = 平均海面からの高さ [m]（外周で 0 へ落とす。頂点と同じ）。
 	 *  傾きは外周でも落とさない（外側の平面も同じ式で傾きを出し、継ぎ目で明るさが変わらないように）。
-	 *  遠くは傾きを弱める（0.5〜4 km で 15 % まで。画素より細かい波の法線はちらつき、水平線近くでは下向きに反射してしまう。そのばらつきは粗さで出す）。細かい波（見た目だけ）は傾きだけに足し、
-	 *  カメラから 150〜900 m で消す（Depth = PixelDepth [cm]。遠くでちらつかないように） */
+	 *  遠くは傾きを弱める（0.5〜4 km で 15 % まで。水平線近くでは下向きに反射してしまう。そのばらつきは粗さで出す）。
+	 *  画素の大きさ（Depth × 0.0015：画角 90°・横 1300 画素ほど）の 2〜6 倍より短い波は、成分ごとに傾きから外す
+	 *  （帯域制限。画素より細かい波を足すと、遠くで菱形の模様（モアレ）になる）。細かい波（見た目だけ）も同じ。
+	 *  高さ（色に使う）は頂点と同じ重み */
 	inline const TCHAR* PixelCode()
 	{
 		return TEXT(R"(
@@ -54,12 +60,15 @@ float2 d = float2(Rel.x, -Rel.y) * 0.01;
 float eta = 0.0;
 float2 slope = float2(0.0, 0.0);
 int n = (int)WaveCount;
+float fp = max(Depth * 0.01, 1.0) * 0.0015;
 for (int i = 0; i < n; i++)
 {
 	float4 c = WaveTex.Load(int3(i, 0, 0));
-	float a = c.x * d.x + c.y * d.y + WaveTex.Load(int3(i, 1, 0)).x;
-	eta += c.z * cos(a);
-	slope -= c.z * c.xy * sin(a);
+	float4 p = WaveTex.Load(int3(i, 1, 0));
+	float a = c.x * d.x + c.y * d.y + p.x;
+	float bw = smoothstep(2.0 * fp, 6.0 * fp, 6.2831853 / max(length(c.xy), 1e-4));
+	eta += p.y * c.z * cos(a);
+	slope -= bw * c.z * c.xy * sin(a);
 }
 float fade = 1.0 - smoothstep(FadeStart, FadeEnd, length(d));
 eta *= fade;
@@ -70,7 +79,8 @@ for (int j = 0; j < r; j++)
 {
 	float4 c = WaveTex.Load(int3(MAX_WAVES + j, 0, 0));
 	float a = c.x * d.x + c.y * d.y + WaveTex.Load(int3(MAX_WAVES + j, 1, 0)).x;
-	ripple -= c.z * c.xy * sin(a);
+	float bw = smoothstep(2.0 * fp, 6.0 * fp, 6.2831853 / max(length(c.xy), 1e-4));
+	ripple -= bw * c.z * c.xy * sin(a);
 }
 slope += ripple * (1.0 - smoothstep(150.0, 900.0, Depth * 0.01));
 return float4(normalize(float3(-slope.x, slope.y, 1.0)), eta);

@@ -102,8 +102,17 @@ public:
 	double PropRpm = 0.0;                 // プロペラ回転数
 	bool bHasJoints = false;
 	double ViewTime = -1.0;               // 表示の時刻（物理時刻の軸）
-	int64 AutonomyFrames = 0;             // autonomy_status（ch 50）を受け取った数（形式は未定、K11）
-	double AutonomyLastT = -1.0;
+	// 自動化レベル（autonomy_status ch 50、std_msgs/String の JSON、D29）。SUT（ship_sut）が 5 Hz で書く
+	int64 AutonomyFrames = 0;             // 受け取った数
+	double AutonomyLastT = -1.0;          // 最後に受け取った物理時刻
+	int32 AutonomyLevel = 0;              // al：4 自律・3 監視・2 縮退・1 遠隔/手動（0 は不明）
+	double AutonomyOddMargin = -1.0;      // odd：ODD 余裕度 0〜1
+	bool bAutonomyMrs = false;            // mrs：最小リスク状態
+	FString AutonomyReason;               // reason
+	FString AutonomyNav;                  // nav：NORMAL・AVOID_STBD・STAND_ON_ACT・SLOW・RETURN
+	double AutonomyCourseDeg = -1.0;      // crs：指令針路 [deg]
+	double AutonomySpeedKt = -1.0;        // spd：指令速力 [kt]
+	int32 AutonomyThreat = 0;             // tgt：主な避航対象の追尾番号（0 は無し）
 	double VectorMinutes = 6.0, OztSafeDomainM = 926.0, OztHorizonS = 900.0, DisplayRangeM = 3000.0;
 	AShipOcean* GetOcean() const { return Ocean; }
 	const TArray<TObjectPtr<UShipCamera>>& GetCameras() const { return Cameras; }
@@ -248,6 +257,7 @@ private:
 	bool bChase = false;
 	EShipView View = EShipView::Free;
 	bool bInitialView = false;
+	int32 WarmFrames = 0;   // 開始の要求の前に、続けて 25 ms 未満だったフレームの数
 	double VelocityWindow = 5.0;
 	FString HudLogPath;
 	TArray<FString> HudLines;
