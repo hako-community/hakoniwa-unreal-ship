@@ -211,6 +211,7 @@ bool AShipFleet::LoadFleet()
 	DisplayRangeM = Ov->GetObjectField(TEXT("ozt"))->GetNumberField(TEXT("display_range_m"));
 	const TSharedPtr<FJsonObject> Auto = Root->GetObjectField(TEXT("autonomy_status"));
 	AutonomyPdu = Auto->GetStringField(TEXT("pdu"));
+	Auto->TryGetStringField(TEXT("foc_pdu"), FocPdu);
 	const TArray<TSharedPtr<FJsonValue>>& ShipSpecs = Root->GetArrayField(TEXT("ships"));
 	Sync.StableSort([&OwnRobot](const FShipSync& A, const FShipSync& B) { return A.Actor->Robot == OwnRobot && B.Actor->Robot != OwnRobot; });
 	for (const FShipSync& S : Sync)
@@ -611,6 +612,19 @@ void AShipFleet::ReadDisturbance(UPduManager* Pdu)
 	{
 		++DistFrames;
 		Ocean->SetWaveParams(W);
+	}
+	// 視程（d_user_custom[0][1]、物理の DisturbancePduData と同じ並び）→ 霧の濃さ（D30）
+	if (Custom.Num() > 0 && Custom[0].Num() > 1 && Custom[0][1] > 0.0 && Custom[0][1] != VisibilityM)
+	{
+		VisibilityM = Custom[0][1];
+		if (!LightingPtr.IsValid())
+		{
+			for (TActorIterator<AShipLighting> It(GetWorld()); It; ++It) { LightingPtr = *It; break; }
+		}
+		if (LightingPtr.IsValid())
+		{
+			LightingPtr->SetVisibilityM(VisibilityM);
+		}
 	}
 }
 
@@ -1279,6 +1293,17 @@ void AShipFleet::Tick(float DeltaSeconds)
 			J->TryGetStringField(TEXT("reason"), AutonomyReason);
 			AutonomyNav.Reset();
 			J->TryGetStringField(TEXT("nav"), AutonomyNav);
+			bAutonomyGnssOk = !J->TryGetNumberField(TEXT("gps"), V) || V > 0.5;
+		}
+	}
+	if (!FocPdu.IsEmpty() && Pdu->ReadPduRawData(ViewShips.Num() > 0 ? ViewShips[0].Robot : FString(), FocPdu, Buf) && Buf.Num() > 0)
+	{
+		HakoCpp_String Str;
+		hako::pdu::PduConvertor<HakoCpp_String, hako::pdu::msgs::std_msgs::String> Conv;
+		if (Conv.pdu2cpp(reinterpret_cast<char*>(Buf.GetData()), Str))
+		{
+			FocCommand = UTF8_TO_TCHAR(Str.data.c_str());
+			FocCommandT = LastPhysicsTime;
 		}
 	}
 	if (Stamp < 0.0)

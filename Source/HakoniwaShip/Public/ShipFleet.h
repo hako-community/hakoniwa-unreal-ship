@@ -113,6 +113,10 @@ public:
 	double AutonomyCourseDeg = -1.0;      // crs：指令針路 [deg]
 	double AutonomySpeedKt = -1.0;        // spd：指令速力 [kt]
 	int32 AutonomyThreat = 0;             // tgt：主な避航対象の追尾番号（0 は無し）
+	bool bAutonomyGnssOk = true;          // gps：SUT が GNSS を健全と見ているか（0 なら推測航法、D30）
+	FString FocCommand;                   // foc_command（ch 51）の最後の JSON（FOC の引き継ぎ・再開、D30）
+	double FocCommandT = -1.0;
+	double VisibilityM = -1.0;            // 外乱 PDU の視程 [m]（霧の濃さ。D30）
 	double VectorMinutes = 6.0, OztSafeDomainM = 926.0, OztHorizonS = 900.0, DisplayRangeM = 3000.0;
 	AShipOcean* GetOcean() const { return Ocean; }
 	const TArray<TObjectPtr<UShipCamera>>& GetCameras() const { return Cameras; }
@@ -265,7 +269,9 @@ private:
 	TArray<EShipView> ShotViews;   // 終わりに撮る画面（-ShipShotViews）
 	int32 ShotStep = -1;
 	int32 ShotWait = 0;
-	FString AutonomyPdu;           // autonomy_status（読むだけ）
+	FString AutonomyPdu;
+	FString FocPdu;
+	TWeakObjectPtr<class AShipLighting> LightingPtr;           // autonomy_status（読むだけ）
 	bool bChaseTowardLight = false;
 	bool bNavLightCheck = false;
 	int32 NavLightCheckFrames = 0;

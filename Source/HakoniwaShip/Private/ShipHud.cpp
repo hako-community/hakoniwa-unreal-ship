@@ -137,9 +137,13 @@ void AShipHud::DrawNavPanel(AShipFleet* F, float X, float Y, float W)
 	if (const AShipOcean* O = F->GetOcean())
 	{
 		const ShipWave::FParams& W = O->GetWaveParams();
-		const FString Sea = O->IsWaveActive()
+		FString Sea = O->IsWaveActive()
 			? FString::Printf(TEXT("WAVE Hs %.2f m  Tp %.1f s  to %s   DEPTH %.0f m"), W.hs_m, W.tp_s, *Deg3(90.0 - FMath::RadiansToDegrees(W.wave_dir_rad)), W.water_depth_m)
 			: FString(TEXT("WAVE calm"));
+		if (F->VisibilityM > 0.0 && F->VisibilityM < 9000.0)
+		{
+			Sea += FString::Printf(TEXT("   VIS %.1f NM"), F->VisibilityM / 1852.0);   // 霧（D30）
+		}
 		Text(Sea, X + 10, Ty, White);
 	}
 	Ty += Line;
@@ -152,8 +156,8 @@ void AShipHud::DrawNavPanel(AShipFleet* F, float X, float Y, float W)
 		const bool bStale = F->ViewTime - F->AutonomyLastT > 1.0;
 		const FLinearColor C = bStale ? Dim : (F->AutonomyLevel >= 4 ? Green : (F->AutonomyLevel == 3 ? Yellow : Red));
 		FString Cmd = F->AutonomyCourseDeg >= 0.0 ? FString::Printf(TEXT("  CMD %s %.1f kn"), *Deg3(F->AutonomyCourseDeg), F->AutonomySpeedKt) : FString();
-		Text(FString::Printf(TEXT("AUTONOMY AL%d  ODD %.2f  %s%s%s%s"), F->AutonomyLevel, F->AutonomyOddMargin, *F->AutonomyNav, *Cmd,
-			F->bAutonomyMrs ? TEXT("  MRS") : TEXT(""), bStale ? TEXT("  (stale)") : TEXT("")), X + 10, Ty, C);
+		Text(FString::Printf(TEXT("AUTONOMY AL%d  ODD %.2f  %s%s%s%s%s"), F->AutonomyLevel, F->AutonomyOddMargin, *F->AutonomyNav, *Cmd,
+			F->bAutonomyMrs ? TEXT("  MRS") : TEXT(""), F->bAutonomyGnssOk ? TEXT("") : TEXT("  GNSS FAULT (DR)"), bStale ? TEXT("  (stale)") : TEXT("")), X + 10, Ty, C);
 	}
 	else
 	{
@@ -347,5 +351,10 @@ void AShipHud::DrawFoc(AShipFleet* F)
 	const float Yt = 54.0f + Line + Th + 16.0f;
 	DrawNavPanel(F, X1, Yt, W);
 	DrawTargetTable(F, X1, Yt + 6 * Line + 24.0f, W);
+	// FOC の指令（ch 51、D30）：最後に出した引き継ぎ・再開
+	if (!F->FocCommand.IsEmpty())
+	{
+		Text(FString::Printf(TEXT("FOC COMMAND  %s  (t %.0f s)"), *F->FocCommand, F->FocCommandT), X1, Ch - 56.0f, Orange, 0.85f);
+	}
 	Text(TEXT("[1] chase  [2] bridge  [3] FOC  [0] free"), X1, Ch - 30.0f, Dim, 0.8f);
 }

@@ -74,7 +74,8 @@
   },
   "autonomy_status": {
     "robot": "OwnShip",
-    "pdu": "autonomy_status"
+    "pdu": "autonomy_status",
+    "foc_pdu": "foc_command"
   },
   "cameras": [
     {
@@ -170,6 +171,13 @@
       "pdu": "autonomy_status",
       "type": "std_msgs/String",
       "channel_id": 50,
+      "pdu_size": 256
+    },
+    {
+      "robot": "OwnShip",
+      "pdu": "foc_command",
+      "type": "std_msgs/String",
+      "channel_id": 51,
       "pdu_size": 256
     },
     {

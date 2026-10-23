@@ -35,6 +35,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Lighting") TObjectPtr<ASkyLight> SkyLight;
 	UPROPERTY(EditAnywhere, Category = "Lighting") TObjectPtr<AStaticMeshActor> SkySphere;
 	UPROPERTY(EditAnywhere, Category = "Lighting") TObjectPtr<AExponentialHeightFog> Fog;
+	/** 視程 [m]（外乱 PDU、D30）に合わせて霧を濃くする。場面の霧より薄くはしない */
+	void SetVisibilityM(double VisibilityM);
+
+private:
+	float BaseFogDensity = -1.0f;
+	float BaseFogCutoff = -1.0f;
+
+public:
 	UPROPERTY(EditAnywhere, Category = "Lighting") TObjectPtr<APostProcessVolume> Post;
 
 	// 昼（太陽の向きは ENU）

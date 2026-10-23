@@ -78,6 +78,10 @@ void AShipLighting::Apply()
 	}
 	if (Fog)
 	{
+		if (BaseFogDensity < 0.0f)
+		{
+			BaseFogDensity = Fog->GetComponent()->FogDensity;
+		}
 		const float Scale = bNight ? NightSkyNits / SkyNits : 1.0f;
 		Fog->GetComponent()->SetFogInscatteringColor(bNight ? FogColor * Scale * NightTint : FogColor);
 	}
@@ -96,4 +100,31 @@ void AShipLighting::Apply()
 	}
 	UE_LOG(LogShipLighting, Log, TEXT("lighting: %s, %s %.3g lx, exposure EV100 %.1f%s"),
 		bNight ? TEXT("night") : TEXT("day"), bNight ? TEXT("moon") : TEXT("sun"), bNight ? MoonLux : SunLux, Ev, Post ? TEXT("") : TEXT(" (no post-process volume)"));
+}
+
+void AShipLighting::SetVisibilityM(double VisibilityM)
+{
+	// 水平に見通すときの霧の透過率（エンジンの HeightFogCommon.ush・SceneCore.cpp）：密度は FogDensity / 1000 [1/cm]、
+	// 線積分は密度 × ln2 × 距離 [cm]、透過率 = 2^(−線積分) = exp(−(ln2)²·FogDensity·1e-3·距離 [cm])。
+	// 視程（コントラスト 2 %、ln 50 = 3.912）が VisibilityM [m] になる濃さ = 3.912 / ((ln2)²·0.1·VisibilityM) = 81.4 / VisibilityM。
+	// 視程が 5 NM（9.26 km）以上は「視界良好」として場面の霞のまま（外乱 PDU の既定 10 km で水平線がかすむと、船橋カメラの水平線の検証が崩れた）。
+	// 5 NM 未満では、空の球（100 km 先）にも霧を掛ける（濃霧で青空と雲が見えないように）
+	if (!Fog || VisibilityM <= 0.0)
+	{
+		return;
+	}
+	if (BaseFogDensity < 0.0f)
+	{
+		BaseFogDensity = Fog->GetComponent()->FogDensity;
+	}
+	UExponentialHeightFogComponent* C = Fog->GetComponent();
+	if (BaseFogCutoff < 0.0f)
+	{
+		BaseFogCutoff = C->FogCutoffDistance;
+	}
+	const bool bRestricted = VisibilityM < 9260.0;
+	const float D = bRestricted ? FMath::Max(BaseFogDensity, static_cast<float>(81.4 / FMath::Max(50.0, VisibilityM))) : BaseFogDensity;
+	C->SetFogDensity(D);
+	C->SetFogCutoffDistance(bRestricted ? 0.0f : BaseFogCutoff);
+	UE_LOG(LogTemp, Log, TEXT("ShipLighting: visibility %.0f m -> fog density %.4f, cutoff %.0f"), VisibilityM, D, C->FogCutoffDistance);
 }
