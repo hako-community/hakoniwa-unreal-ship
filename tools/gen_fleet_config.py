@@ -26,6 +26,8 @@ usage: py -3.12 tools/gen_fleet_config.py [--check]
 import argparse
 import json
 import struct
+
+import numpy as np
 import sys
 from pathlib import Path
 
@@ -37,6 +39,13 @@ WAVE_SRC = SHIPNAVI / "hakoniwa-mujoco-ship" / "include" / "ship" / "environment
 WAVE_OUT = PROJECT / "Source" / "HakoniwaShip" / "Public" / "ThirdParty" / "wave_spectrum.hpp"
 GLB_OUT = PROJECT / "SourceArt" / "Ships"
 SHIP_SPECS = SHIPNAVI.parent / "images" / "image2sim-framework" / "output"
+# 船載カメラ（SHP-25）：船舶生成器の取り付け位置（mounts の camera_rgb）→ 書き戻す PDU（pdu_config_ship.json）
+CAMERA_PDUS = {"camera_bow_center": "camera_bow", "camera_bridge_front": "camera_bridge"}
+CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_RATE_HZ = 640, 480, 10.0
+# 取り付け位置は船舶生成器のカメラの筐体（上部構造物のメッシュの暗い箱、前へ最大 0.58 m）の中。筐体を写さないよう手前を切る [m]
+CAMERA_NEAR_CLIP_M = 0.7
+# 取り付け位置が船体・上部構造物の閉じた箱の中にあるとき（749GT の camera_bridge_front は操舵室の箱の中）、レンズを前方の面の外へ出す距離 [m]
+CAMERA_LENS_OUTSIDE_M = 0.3
 PLANT_EXPECTED = GODOT / "tests" / "integration" / "plant_coupling" / "expected.json"
 # 物理プラグイン（ship_hydro_plugin.cpp の update_wave_engine_if_needed）と同じ成分数・有効化の閾値
 WAVE_COMPONENTS = 32
@@ -186,6 +195,7 @@ def build_ship(ship: dict) -> dict:
         raise SystemExit(f"{model}: root node has a transform (not supported)")
     joint_nodes = {j["node_name"]: j for j in profile["joints"]}
     parts, joints = [], []
+    mounts = {}
     lo_all = [float("inf")] * 3
     hi_all = [float("-inf")] * 3
     for idx in root.get("children", []):
@@ -195,6 +205,8 @@ def build_ship(ship: dict) -> dict:
             raise SystemExit(f"{model}/{name}: nested or rotated nodes are not supported")
         t = nd.get("translation", [0.0, 0.0, 0.0])
         if "mesh" not in nd:
+            if name.startswith("mount_"):
+                mounts[name[len("mount_"):]] = r6(gltf_to_flu(t))
             continue
         lo, hi = mesh_bounds_gltf(g, nd["mesh"])
         is_joint = name.startswith(JOINT_PREFIXES)
@@ -233,6 +245,7 @@ def build_ship(ship: dict) -> dict:
         "joints": joints,
         "materials": materials(g),
         "nav_lights": nav_lights(model, {p["node"] for p in parts}),
+        "mounts": mounts,
         "ais": ship.get("ais", {}),
     }
     if ship.get("joint_states_pdu"):
@@ -258,6 +271,7 @@ def build() -> dict:
         wanted.append((clock["robot"], clock["pdu"]))
     dist = fleet["disturbance"]
     wanted.append((dist["robot"], dist["pdu"]))
+    cams = cameras(fleet, ships)
     pdus = []
     for robot, name in wanted:
         p = table.get((robot, name))
@@ -265,6 +279,12 @@ def build() -> dict:
             raise SystemExit(f"PDU not in pdu_config_ship.json: {robot}/{name}")
         pdus.append({"robot": robot, "pdu": name, "type": p["type"],
                      "channel_id": p["channel_id"], "pdu_size": p["pdu_size"]})
+    for c in cams:
+        p = table.get((c["robot"], c["pdu"]))
+        if p is None or p["type"] != "sensor_msgs/Image":
+            raise SystemExit(f"camera PDU not in pdu_config_ship.json as sensor_msgs/Image: {c['robot']}/{c['pdu']}")
+        pdus.append({"robot": c["robot"], "pdu": c["pdu"], "type": p["type"],
+                     "channel_id": p["channel_id"], "pdu_size": p["pdu_size"], "write": True})
     return {
         "version": 1,
         "generated_by": "tools/gen_fleet_config.py (from hakoniwa-godot-ship/config/fleet.json, pdu_config_ship.json, Models/*.glb)",
@@ -277,9 +297,95 @@ def build() -> dict:
             "preview": fleet["preview_wave"],
         },
         "plant_check": plant_check(),
+        "cameras": cams,
         "pdus": pdus,
         "ships": ships,
     }
+
+
+def glb_triangles_flu(path: Path) -> np.ndarray:
+    """glb の全メッシュの三角形（FLU、船体の座標）。形は (n, 3, 3)"""
+    b = path.read_bytes()
+    n = struct.unpack_from("<I", b, 12)[0]
+    g = json.loads(b[20:20 + n])
+    bin_at = 20 + n + 8
+
+    def acc(i):
+        a = g["accessors"][i]
+        v = g["bufferViews"][a["bufferView"]]
+        off = bin_at + v.get("byteOffset", 0) + a.get("byteOffset", 0)
+        dt = {5126: np.float32, 5123: np.uint16, 5125: np.uint32}[a["componentType"]]
+        c = {"VEC3": 3, "SCALAR": 1}[a["type"]]
+        return np.frombuffer(b, dtype=dt, count=a["count"] * c, offset=off).reshape(-1, c)
+
+    out = []
+    root = g["nodes"][g["scenes"][g.get("scene", 0)]["nodes"][0]]
+    for i in root.get("children", []):
+        nd = g["nodes"][i]
+        if "mesh" not in nd:
+            continue
+        tr = np.array(nd.get("translation", [0.0, 0.0, 0.0]))
+        for prim in g["meshes"][nd["mesh"]]["primitives"]:
+            pos = acc(prim["attributes"]["POSITION"]).astype(np.float64) + tr
+            flu = np.stack([-pos[:, 2], -pos[:, 0], pos[:, 1]], 1)
+            out.append(flu[acc(prim["indices"]).reshape(-1, 3)])
+    return np.concatenate(out)
+
+
+def ray_hits(tris: np.ndarray, o: np.ndarray, d: np.ndarray) -> np.ndarray:
+    """三角形との交点までの距離（当たらない三角形は除く、昇順）。Möller–Trumbore"""
+    e1 = tris[:, 1] - tris[:, 0]
+    e2 = tris[:, 2] - tris[:, 0]
+    h = np.cross(d, e2)
+    a = np.einsum("ij,ij->i", e1, h)
+    ok = np.abs(a) > 1e-12
+    f = np.where(ok, 1.0 / np.where(ok, a, 1.0), 0.0)
+    s = o - tris[:, 0]
+    u = f * np.einsum("ij,ij->i", s, h)
+    q = np.cross(s, e1)
+    v = f * (q @ d)
+    tt = f * np.einsum("ij,ij->i", e2, q)
+    hit = ok & (u >= 0) & (u <= 1) & (v >= 0) & (u + v <= 1) & (tt > 0)
+    return np.sort(tt[hit])
+
+
+def camera_lens(model: str, origin: list):
+    """レンズの位置：取り付け位置が閉じた箱の中（6 方向すべてに、カメラの筐体（CAMERA_NEAR_CLIP_M 以内）より先の面がある）なら、
+    前方（+x）の最初の面の CAMERA_LENS_OUTSIDE_M 外へ出す。外にあればそのまま。返り値は (位置, 移した距離)"""
+    tris = glb_triangles_flu(GODOT / "Models" / model / f"{model}.glb")
+    o = np.array(origin, dtype=np.float64)
+    beyond = {}
+    for name, d in (("+x", (1, 0, 0)), ("-x", (-1, 0, 0)), ("+y", (0, 1, 0)), ("-y", (0, -1, 0)), ("+z", (0, 0, 1)), ("-z", (0, 0, -1))):
+        h = ray_hits(tris, o, np.array(d, dtype=np.float64))
+        h = h[h > CAMERA_NEAR_CLIP_M]
+        beyond[name] = float(h[0]) if len(h) else None
+    if all(v is not None for v in beyond.values()):
+        dx = beyond["+x"] + CAMERA_LENS_OUTSIDE_M
+        return r6([o[0] + dx, o[1], o[2]]), round(dx, 3)
+    return r6(o), 0.0
+
+
+def cameras(fleet: dict, ships: list) -> list:
+    """自船の船載カメラ（SHP-25）。位置は glb の mount_<id>（閉じた箱の中なら前の面の外へ出したレンズの位置 origin、元は mount）、
+    画角は船舶生成器の mounts。向きは船首方向・水平（船体に固定）"""
+    own = fleet["overlays"]["own_ship"]
+    ship = next(s for s in ships if s["robot"] == own)
+    spec = load_json(SHIP_SPECS / ship["model"] / "resolved_config.json")
+    out = []
+    for m in find_key(spec, "mounts") or []:
+        if m.get("type") != "camera_rgb":
+            continue
+        mid = m["id"]
+        if mid not in CAMERA_PDUS:
+            raise SystemExit(f"{ship['model']}: camera mount {mid} has no PDU (CAMERA_PDUS)")
+        if mid not in ship["mounts"]:
+            raise SystemExit(f"{ship['model']}: mount_{mid} not in the glb")
+        lens, moved = camera_lens(ship["model"], ship["mounts"][mid])
+        out.append({"robot": own, "pdu": CAMERA_PDUS[mid], "frame_id": mid, "mount": ship["mounts"][mid], "origin": lens,
+                    "moved_out_m": moved,
+                    "fov_deg": float(m.get("fov_deg", 90.0)), "width": CAMERA_WIDTH, "height": CAMERA_HEIGHT,
+                    "rate_hz": CAMERA_RATE_HZ, "encoding": "rgb8", "near_clip_m": CAMERA_NEAR_CLIP_M})
+    return out
 
 
 def plant_check() -> dict:

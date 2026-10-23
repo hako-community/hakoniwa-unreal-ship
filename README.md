@@ -113,6 +113,39 @@ pwsh -Command "& .\scripts\windows\run_plant_test.ps1 -Screenshot -ExtraArgs @('
 * ★ 動的な材質のインスタンスは動的なインスタンスを親にできない（灯の材質は元の材質から作り、値を入れ直す）。
 * 遠くの船（数 km）の灯は画素より小さく、ほとんど見えない（残り）。
 
+## 船載カメラの PDU 書き戻し（SHP-25 Step 1）
+
+```powershell
+pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60      # 受け手のアセットが画像 PDU を読み、水平線を姿勢と照合する（CAMERA_PDU_OK / CAMERA_HORIZON_OK）
+pwsh scripts\windows\ship_scene.ps1 -Smoke                # （箱庭なし）
+# 画像を見る：Unreal に -ShipCameraDump=<dir> を付けると 2 s ごとに PNG を保存する
+```
+
+| PDU | ch | 型 | 中身 |
+|---|---:|---|---|
+| `OwnShip/camera_bow` | 17 | `sensor_msgs/Image` | 船首カメラ（取り付け位置 `camera_bow_center`、水平画角 90°） |
+| `OwnShip/camera_bridge` | 18 | `sensor_msgs/Image` | 船橋前面カメラ（`camera_bridge_front`、水平画角 110°） |
+
+* 640×480・`rgb8`（無圧縮、sRGB）・10 Hz。PDU の大きさは 1 MiB（画像 921,600 B ＋ 見出し 312 B が入らなかったので `pdu_config_ship.json` を変更）。
+* `UShipCamera`：自船の取り付け位置（船舶生成器の `mounts`、glb の `mount_<id>`）にシーンキャプチャを置き、画面と同じ見た目（ポストプロセス後：
+  太陽光のまぶしさ・霧・夜の灯火・露出）を撮る。向きは船首方向・水平（船体に固定、揺れと一緒に動く）。
+  * 撮る時刻：表示時刻（D24）が 0.1 s の区切りを越えたフレーム。`header.stamp` はそのフレームの表示時刻（船と海面がその時刻で描かれている）。2 台は半周期ずらす。
+  * 読み出しは非同期（GPU の写しを数フレーム後に受け取る。最大 4 フレーム）。描画は止めない（2 台で 113 FPS、25 ms 超 0）。
+  * ★ 書き込みの描画先は `RTF_RGBA8_SRGB`（`RTF_RGBA8` だと線形のまま入り、画素の値が 2 段ほど暗い）。
+  * ★ 取り付け位置は船舶生成器のカメラの筐体（上部構造物のメッシュ）の中なので、手前 0.7 m を切る（`near_clip_m`）。
+  * ★ 749GT の `camera_bridge_front` は操舵室の閉じた箱の中にある（船舶生成器の配置の誤り）。`gen_fleet_config.py` が 6 方向に光線を飛ばして閉じた箱の中と判定し、
+    レンズを前の面の 0.3 m 外（7.1 m 前）へ出す（`fleet_ue.json` の `mount` と `origin`・`moved_out_m`）。
+  * 船首カメラは高さ 7.2 m で、船首のブルワークの上端（7.23 m）とほぼ同じ高さのため、海はほとんどブルワークに隠れる（船舶生成器の配置のまま）。
+* 検証（`run_plant_test.ps1`）：
+  1. Unreal の中：撮った数・書いた数（表示時刻の長さ × 10 Hz の 9 割以上）、書き込みの失敗・捨てた画像 0、画像の平均の明るさ。
+  2. 受け手（`tools/check_camera_pdu.py`、SDK の Python で箱庭のアセットとして読む）：数、時刻の順と間隔（0.1 s、1.5 周期を超える空き 2 % 以下）、
+     形式（frame_id・640×480・rgb8・step・データの長さ）、明るさ → `CAMERA_PDU_OK`。★ 読み終えても時刻を進め続ける（箱庭は全アセットの足並みをそろえる）。
+  3. 水平線（`tools/compare_camera_horizon.py`）：船橋カメラの画像の左右の端の列で空と海の境目を海のきめ（粗さ）で見つけ、画像の時刻の姿勢（trace）から求めた
+     行と比べる。見つかるのは波面メッシュの外周（真の水平線より約 2.4 画素下）なので、走行全体の一定のずれ（0〜6 画素）を引いた残差で判定（中央値 1・最大 4 画素）
+     → `CAMERA_HORIZON_OK`。取り付けを 2° 上に向けると FAIL になることを確かめた。（0.1 s の時刻のずれは、この海況の揺れの速さでは 0.3 画素ほどで見分けられない）
+* ★ 箱庭の共有メモリ（`Z:/mmap_ship` の `mmap-*.bin`）は前の実行の大きさのまま残り、PDU の表が大きくなっても広がらない（Unreal が書き込みで落ちた）。
+  `run_plant_test.ps1` は前の箱庭が動いていなければ始める前に消す。
+
 ## 場面（Step 1）
 
 | 要素 | 中身 |
@@ -127,7 +160,8 @@ pwsh -Command "& .\scripts\windows\run_plant_test.ps1 -Screenshot -ExtraArgs @('
 1. ~~Step 2：`AShipActor` に船の姿勢（D14・D18）と関節（`joint_states`）を反映する~~（済）
 2. ~~Step 3：海面を D4 の Gerstner 波で描く（時刻は D19）~~（済）
 3. ~~Step 4：新しい glb（塗装・上部構造物つき）を取り込み、Godot 側と見た目をそろえる~~（済）
-4. ~~Step 5：太陽光のまぶしさ・夜・航海灯~~（済）。残り：遠くの灯の見え方（画素より小さい灯）、SHP-25（船載カメラの PDU 書き戻し・ブリッジ視界）
+4. ~~Step 5：太陽光のまぶしさ・夜・航海灯~~（済）。残り：遠くの灯の見え方（画素より小さい灯）
+5. SHP-25：~~Step 1 船載カメラの PDU 書き戻し~~（済）、Step 2 ブリッジ視界・FOC 画面
 
 ## ライセンス
 

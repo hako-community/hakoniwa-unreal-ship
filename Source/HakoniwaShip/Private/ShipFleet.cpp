@@ -24,6 +24,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "ShipActor.h"
 #include "ShipFrame.h"
+#include "ShipCamera.h"
 #include "ShipLighting.h"
 #include "ShipOcean.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -130,6 +131,7 @@ bool AShipFleet::LoadFleet()
 		R.Type = P->GetStringField(TEXT("type"));
 		R.Channel = P->GetIntegerField(TEXT("channel_id"));
 		R.Size = P->GetIntegerField(TEXT("pdu_size"));
+		P->TryGetBoolField(TEXT("write"), R.bWrite);
 		MaxSize = FMath::Max(MaxSize, R.Size);
 		PduTable.Add(R);
 	}
@@ -150,6 +152,27 @@ bool AShipFleet::LoadFleet()
 		Sh.PosPdu = S->GetStringField(TEXT("pos_pdu"));
 		S->TryGetStringField(TEXT("joint_states_pdu"), Sh.JointPdu);
 		Sync.Add(Sh);
+	}
+	// 船載カメラ（SHP-25）：自船に取り付ける。2 台は半周期ずらして撮る
+	const TArray<TSharedPtr<FJsonValue>>* Cams = nullptr;
+	if (Root->TryGetArrayField(TEXT("cameras"), Cams))
+	{
+		for (const TSharedPtr<FJsonValue>& V : *Cams)
+		{
+			const TSharedPtr<FJsonObject> C = V->AsObject();
+			const FString Robot = C->GetStringField(TEXT("robot"));
+			const TObjectPtr<AShipActor>* Ship = Ships.FindByPredicate([&Robot](const TObjectPtr<AShipActor>& A) { return A->Robot == Robot; });
+			UShipCamera* Cam = NewObject<UShipCamera>(this);
+			const double Phase = Cameras.Num() * 0.5 / FMath::Max(1.0, C->GetNumberField(TEXT("rate_hz")));
+			if (Ship && Cam->Init(*Ship, C, Phase))
+			{
+				Cameras.Add(Cam);
+			}
+			else
+			{
+				UE_LOG(LogShipFleet, Error, TEXT("camera %s not created"), *C->GetStringField(TEXT("frame_id")));
+			}
+		}
 	}
 	// 海面（Step 3）
 	const TSharedPtr<FJsonObject> Wave = Root->GetObjectField(TEXT("wave"));
@@ -204,6 +227,8 @@ void AShipFleet::BeginPlay()
 	FString Toward;
 	bChaseTowardLight = FParse::Value(Cmd, TEXT("-ShipChaseToward="), Toward) && Toward == TEXT("light");
 	bNavLightCheck = FParse::Param(Cmd, TEXT("ShipNavLightCheck"));
+	FString CameraDump;
+	bCamerasOffline = FParse::Value(Cmd, TEXT("-ShipCameraDump="), CameraDump);
 	if (!LoadFleet())
 	{
 		if (CheckSec > 0.0)
@@ -264,7 +289,7 @@ void AShipFleet::BeginPlay()
 
 FString AShipFleet::WritePduConfig() const
 {
-	// PduManager の PDU の表（pdu_config_ship.json と同じ形。読む PDU だけ）。PduManager は Content からの相対で読むので、
+	// PduManager の PDU の表（pdu_config_ship.json と同じ形。読む PDU と、船載カメラの書く PDU）。PduManager は Content からの相対で読むので、
 	// Saved に書いて Content からの相対の道を返す（rover と同じ）
 	TArray<FString> Robots;
 	for (const FShipPduRead& R : PduTable)
@@ -274,17 +299,17 @@ FString AShipFleet::WritePduConfig() const
 	TArray<FString> RobotJson;
 	for (const FString& Robot : Robots)
 	{
-		TArray<FString> Readers;
+		TArray<FString> Readers, Writers;
 		for (const FShipPduRead& R : PduTable)
 		{
 			if (R.Robot == Robot)
 			{
-				Readers.Add(FString::Printf(TEXT("{\"type\":\"%s\",\"org_name\":\"%s\",\"name\":\"%s_%s\",\"channel_id\":%d,\"pdu_size\":%d,\"write_cycle\":1,\"method_type\":\"SHM\"}"),
+				(R.bWrite ? Writers : Readers).Add(FString::Printf(TEXT("{\"type\":\"%s\",\"org_name\":\"%s\",\"name\":\"%s_%s\",\"channel_id\":%d,\"pdu_size\":%d,\"write_cycle\":1,\"method_type\":\"SHM\"}"),
 					*R.Type, *R.Pdu, *R.Robot, *R.Pdu, R.Channel, R.Size));
 			}
 		}
-		RobotJson.Add(FString::Printf(TEXT("{\"name\":\"%s\",\"rpc_pdu_readers\":[],\"rpc_pdu_writers\":[],\"shm_pdu_readers\":[%s],\"shm_pdu_writers\":[]}"),
-			*Robot, *FString::Join(Readers, TEXT(","))));
+		RobotJson.Add(FString::Printf(TEXT("{\"name\":\"%s\",\"rpc_pdu_readers\":[],\"rpc_pdu_writers\":[],\"shm_pdu_readers\":[%s],\"shm_pdu_writers\":[%s]}"),
+			*Robot, *FString::Join(Readers, TEXT(",")), *FString::Join(Writers, TEXT(","))));
 	}
 	const FString Json = FString::Printf(TEXT("{\"robots\":[%s]}"), *FString::Join(RobotJson, TEXT(",")));
 	const FString File = FPaths::ProjectSavedDir() / TEXT("HakoniwaShip/ship_pdu.json");
@@ -319,9 +344,9 @@ void AShipFleet::OnHakoInitialize_Implementation()
 	bool bAll = true;
 	for (const FShipPduRead& R : PduTable)
 	{
-		const bool bOk = Pdu->DeclarePduForRead(R.Robot, R.Pdu);
+		const bool bOk = R.bWrite ? Pdu->DeclarePduForWrite(R.Robot, R.Pdu) : Pdu->DeclarePduForRead(R.Robot, R.Pdu);
 		bAll &= bOk;
-		UE_LOG(LogShipFleet, Log, TEXT("OnHakoInitialize: declare for read %s/%s (ch %d) = %d"), *R.Robot, *R.Pdu, R.Channel, bOk);
+		UE_LOG(LogShipFleet, Log, TEXT("OnHakoInitialize: declare for %s %s/%s (ch %d) = %d"), R.bWrite ? TEXT("write") : TEXT("read"), *R.Robot, *R.Pdu, R.Channel, bOk);
 	}
 	bDeclared = bAll;
 }
@@ -713,6 +738,16 @@ void AShipFleet::FinishCheck(double PhysicsTime)
 		if (S.Actor->MaxBoundsErr > 1.0e-3) { Problems.Add(FString::Printf(TEXT("%s: mesh bounds err %.4f m"), *S.Actor->Robot, S.Actor->MaxBoundsErr)); }
 	}
 	CheckSea(Problems);
+	// 船載カメラ（SHP-25）：表示時刻の長さ × 周期の 9 割以上を書き、失敗・捨てた画像が無く、画像が真っ黒・真っ白でないこと
+	for (const UShipCamera* Cam : Cameras)
+	{
+		const double Expected = (PhysicsTime - FirstDisplayTime) * Cam->RateHz;
+		UE_LOG(LogShipFleet, Log, TEXT("SHIP_CAMERA %s -> %s/%s: captured %lld, written %lld (expected ~%.0f), failures %lld, dropped %lld, max latency %d frames, last stamp %.3f s, mean luma %.1f"),
+			*Cam->FrameId, *Cam->Robot, *Cam->PduName, Cam->Captured, Cam->Written, Expected, Cam->WriteFailures, Cam->Dropped, Cam->MaxLatencyFrames, Cam->LastStamp, Cam->MeanLuma);
+		if (Cam->Written < 0.9 * Expected) { Problems.Add(FString::Printf(TEXT("%s: only %lld images written"), *Cam->FrameId, Cam->Written)); }
+		if (Cam->WriteFailures > 0 || Cam->Dropped > 0) { Problems.Add(FString::Printf(TEXT("%s: %lld write failures, %lld dropped"), *Cam->FrameId, Cam->WriteFailures, Cam->Dropped)); }
+		if (Cam->MeanLuma < 5.0 || Cam->MeanLuma > 250.0) { Problems.Add(FString::Printf(TEXT("%s: image mean luma %.1f"), *Cam->FrameId, Cam->MeanLuma)); }
+	}
 	// 表示時刻のなめらかさ：止まったフレーム（新しい物理が届かない間）の割合
 	const double HoldRatio = DisplayFrames > 0 ? static_cast<double>(DisplayHolds) / DisplayFrames : 1.0;
 	const double HitchRatio = HitchFrames > 0 ? static_cast<double>(Hitches) / HitchFrames : 0.0;
@@ -929,6 +964,15 @@ void AShipFleet::Tick(float DeltaSeconds)
 	{
 		FPlatformMisc::RequestExitWithStatus(false, ExitCode);
 	}
+	if (!bSync && bCamerasOffline)
+	{
+		// つながないとき（-ShipCameraDump）：ゲームの時刻で撮り、PDU には書かずに保存だけする
+		for (UShipCamera* Cam : Cameras)
+		{
+			Cam->MaybeCapture(GetWorld()->GetTimeSeconds());
+			Cam->Poll(nullptr);
+		}
+	}
 	if (!bSync || bDone)
 	{
 		return;
@@ -1016,6 +1060,12 @@ void AShipFleet::Tick(float DeltaSeconds)
 	for (FShipSync& S : Sync)
 	{
 		ApplyAt(S, DisplayTime);
+	}
+	// 船載カメラ（SHP-25）：船と海面が表示時刻で置かれたこのフレームを撮る（画像の時刻 = 表示時刻）。届いた画像を PDU に書く
+	for (UShipCamera* Cam : Cameras)
+	{
+		Cam->MaybeCapture(DisplayTime);
+		Cam->Poll(Pdu);
 	}
 	// 標本は始まって 1 s 後から（開始直後は物理が遅れを取り戻すため時刻が数ステップずつ飛び、最初の pos の時刻が決められない）
 	if (!SamplesPath.IsEmpty() && DisplayTime >= FirstDisplayTime + 1.0 && DisplayTime - LastSampleTime >= SampleInterval - 1e-9)

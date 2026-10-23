@@ -53,6 +53,52 @@
       }
     }
   },
+  "cameras": [
+    {
+      "robot": "OwnShip",
+      "pdu": "camera_bow",
+      "frame_id": "camera_bow_center",
+      "mount": [
+        44.0,
+        0.0,
+        7.2
+      ],
+      "origin": [
+        44.0,
+        0.0,
+        7.2
+      ],
+      "moved_out_m": 0.0,
+      "fov_deg": 90.0,
+      "width": 640,
+      "height": 480,
+      "rate_hz": 10.0,
+      "encoding": "rgb8",
+      "near_clip_m": 0.7
+    },
+    {
+      "robot": "OwnShip",
+      "pdu": "camera_bridge",
+      "frame_id": "camera_bridge_front",
+      "mount": [
+        -33.5,
+        0.0,
+        15.5
+      ],
+      "origin": [
+        -26.400001,
+        0.0,
+        15.5
+      ],
+      "moved_out_m": 7.1,
+      "fov_deg": 110.0,
+      "width": 640,
+      "height": 480,
+      "rate_hz": 10.0,
+      "encoding": "rgb8",
+      "near_clip_m": 0.7
+    }
+  ],
   "pdus": [
     {
       "robot": "OwnShip",
@@ -95,6 +141,22 @@
       "type": "hako_msgs/Disturbance",
       "channel_id": 4,
       "pdu_size": 256
+    },
+    {
+      "robot": "OwnShip",
+      "pdu": "camera_bow",
+      "type": "sensor_msgs/Image",
+      "channel_id": 17,
+      "pdu_size": 1048576,
+      "write": true
+    },
+    {
+      "robot": "OwnShip",
+      "pdu": "camera_bridge",
+      "type": "sensor_msgs/Image",
+      "channel_id": 18,
+      "pdu_size": 1048576,
+      "write": true
     }
   ],
   "ships": [
@@ -855,6 +917,58 @@
           "intensity_cd": 12.059
         }
       ],
+      "mounts": {
+        "camera_bow_center": [
+          44.0,
+          0.0,
+          7.2
+        ],
+        "camera_bridge_front": [
+          -33.5,
+          0.0,
+          15.5
+        ],
+        "echo_sounder": [
+          32.0,
+          0.0,
+          -3.8
+        ],
+        "gnss_antenna": [
+          -36.0,
+          0.0,
+          21.0
+        ],
+        "gyro_compass": [
+          -35.0,
+          0.0,
+          4.0
+        ],
+        "lidar_bow": [
+          44.5,
+          0.0,
+          6.8
+        ],
+        "lidar_port_wing": [
+          -34.0,
+          7.1,
+          15.2
+        ],
+        "lidar_stbd_wing": [
+          -34.0,
+          -7.1,
+          15.2
+        ],
+        "radar_sband": [
+          -36.0,
+          0.0,
+          18.0
+        ],
+        "radar_xband": [
+          -36.0,
+          0.0,
+          20.5
+        ]
+      },
       "ais": {
         "has_ais": true,
         "mmsi": 431000001,
@@ -1619,6 +1733,58 @@
           "intensity_cd": 12.059
         }
       ],
+      "mounts": {
+        "camera_bow_center": [
+          61.5,
+          0.0,
+          10.0
+        ],
+        "camera_bridge_front": [
+          -45.0,
+          0.0,
+          20.5
+        ],
+        "echo_sounder": [
+          45.0,
+          0.0,
+          -6.0
+        ],
+        "gnss_antenna": [
+          -49.0,
+          0.0,
+          27.5
+        ],
+        "gyro_compass": [
+          -48.0,
+          0.0,
+          5.0
+        ],
+        "lidar_bow": [
+          62.0,
+          0.0,
+          9.5
+        ],
+        "lidar_port_wing": [
+          -46.0,
+          10.6,
+          20.0
+        ],
+        "lidar_stbd_wing": [
+          -46.0,
+          -10.6,
+          20.0
+        ],
+        "radar_sband": [
+          -49.0,
+          0.0,
+          24.0
+        ],
+        "radar_xband": [
+          -49.0,
+          0.0,
+          27.0
+        ]
+      },
       "ais": {
         "has_ais": true,
         "mmsi": 431000002,
@@ -2294,6 +2460,53 @@
           "intensity_cd": 12.059
         }
       ],
+      "mounts": {
+        "camera_bow_center": [
+          29.0,
+          0.0,
+          6.0
+        ],
+        "camera_bridge_front": [
+          9.5,
+          0.0,
+          12.2
+        ],
+        "echo_sounder": [
+          20.0,
+          0.0,
+          -3.1
+        ],
+        "gnss_antenna": [
+          7.5,
+          0.0,
+          17.0
+        ],
+        "gyro_compass": [
+          5.0,
+          0.0,
+          4.0
+        ],
+        "lidar_bow": [
+          29.5,
+          0.0,
+          5.8
+        ],
+        "lidar_port_wing": [
+          10.0,
+          7.1,
+          12.0
+        ],
+        "lidar_stbd_wing": [
+          10.0,
+          -7.1,
+          12.0
+        ],
+        "radar_xband": [
+          8.0,
+          0.0,
+          16.5
+        ]
+      },
       "ais": {
         "has_ais": true,
         "mmsi": 431000003,
@@ -2890,6 +3103,18 @@
           "intensity_cd": 4.287
         }
       ],
+      "mounts": {
+        "gps_antenna": [
+          0.5,
+          0.0,
+          3.8
+        ],
+        "radar_reflector": [
+          0.5,
+          0.0,
+          4.2
+        ]
+      },
       "ais": {
         "has_ais": false
       }

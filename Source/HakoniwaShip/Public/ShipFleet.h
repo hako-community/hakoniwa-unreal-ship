@@ -17,6 +17,7 @@
 //   -ShipChaseToward=light    追うカメラを太陽（夜は月）の方へ向ける（まぶしさ・照り返しの確認、Step 5）
 //   -ShipNavLightCheck        夜（-ShipNight）に、各船の航海灯を周り 36 方位から撮り、射光範囲（COLREG 第 21 条）の内だけ光るかを確かめる
 //                             （HAKONIWA_UNREAL_SHIP_NAVLIGHT_OK / _FAILED。始まって 60 フレーム後に 1 回）
+//   -ShipCameraDump=<dir>     船載カメラ（SHP-25）の画像を 2 s ごとに PNG で保存（箱庭につながないときもこれで撮る）
 //   -ShipFrameLog=<csv>       フレームごとの壁時計・物理時刻・表示時刻（カクつきの調査用。-ShipSyncCheck の終わりに書く）
 //
 // 表示時刻（Step 3）：物理は 50 Hz、描画は 130〜200 FPS。受信した値をそのまま描くと 2〜4 フレームごとに飛んでカクつくので、
@@ -39,6 +40,7 @@
 
 class AShipActor;
 class AShipLighting;
+class UShipCamera;
 class AShipOcean;
 class UCameraComponent;
 class UPduManager;
@@ -53,6 +55,7 @@ struct FShipPduRead
 	FString Type;
 	int32 Channel = 0;
 	int32 Size = 0;
+	bool bWrite = false;   // ビューアが書く PDU（船載カメラ、SHP-25）
 };
 
 UCLASS()
@@ -210,4 +213,6 @@ private:
 	UPROPERTY() TObjectPtr<UCameraComponent> ChaseCam;
 	UPROPERTY() TObjectPtr<AShipOcean> Ocean;
 	UPROPERTY() TObjectPtr<AShipLighting> Lighting;
+	UPROPERTY() TArray<TObjectPtr<UShipCamera>> Cameras;   // 船載カメラ（SHP-25。fleet_ue.json の cameras）
+	bool bCamerasOffline = false;                         // つながないときも撮る（-ShipCameraDump）
 };
