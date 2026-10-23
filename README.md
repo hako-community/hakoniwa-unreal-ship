@@ -32,7 +32,7 @@ pwsh scripts\windows\ship_scene.ps1 -Open     # エディタで開く
 ```powershell
 py -3.12 tools\gen_fleet_config.py              # Config\Fleet\fleet_ue.json を作り直す（--check で最新か確かめる）
 pwsh scripts\windows\run_plant_test.ps1         # conductor → ship_plant ＋ 外乱 → Unreal。成功で HAKONIWA_UNREAL_SHIP_PLANT_OK
-pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 終わりに自船を追うカメラで撮る（Saved\ShipLogs\plant_<時刻>\view.png）
+pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 終わりに 3 画面を撮る（Saved\ShipLogs\plant_<時刻>\view_chase.png・view_bridge.png・view_foc.png）
 ```
 
 * 船の一覧・PDU・形は Godot ビューアと同じ（`tools/gen_fleet_config.py` が `hakoniwa-godot-ship/config/fleet.json`・`pdu_config_ship.json`・`Models/*.glb`・`ship_sync.profile.json` から作る。手で写さない）。
@@ -146,6 +146,30 @@ pwsh scripts\windows\ship_scene.ps1 -Smoke                # （箱庭なし）
 * ★ 箱庭の共有メモリ（`Z:/mmap_ship` の `mmap-*.bin`）は前の実行の大きさのまま残り、PDU の表が大きくなっても広がらない（Unreal が書き込みで落ちた）。
   `run_plant_test.ps1` は前の箱庭が動いていなければ始める前に消す。
 
+## ブリッジ視界・FOC 画面（SHP-25 Step 2）
+
+```powershell
+pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 航海情報を trace と照合（HAKONIWA_UNREAL_SHIP_NAV_OK）、終わりに 3 画面を撮る
+# キー 1：自船を追う  2：船橋からの視界  3：FOC  0：自由（観客）。起動の引数 -ShipView=chase|bridge|foc|free
+```
+
+* 船橋（キー 2）：目は船橋カメラの取り付け位置（操舵室の前面）の 0.5 m 前、水平画角 75°、船と一緒に揺れる。
+  * 左上の表示板：自船の HDG・COG・SOG・ROT・舵角（右舵正。物理の舵角は左舵正）・プロペラ回転数・波（Hs・Tp・進む向き）・水深・他船の数と衝突の危険の数・自動化レベル。
+  * 上：船首方位の目盛り（カメラの向き）に HDG（白）と COG（水色）の印。
+  * 他船のタグ（画面上の船の位置）：船名（AIS の無い船は黄で `NON-AIS (radar)`）・距離・方位（相対方位）・CPA/TCPA。衝突の危険は赤。
+* FOC（キー 3）：画面全体を覆う陸上監視センターの表示板。
+  * 左：北が上・自船中心の海図（半径 1.6 NM、0.5 NM ごとの距離環）。各船の向き・6 分の速度ベクトル・1 s ごとの航跡（最大 900 点）、OZT の危険進路の弧（橙）。
+  * 右上：船首・船橋カメラの画像（PDU に書いているのと同じ描画先）。右下：航海情報と他船の表（距離・方位・CPA・TCPA・ALARM）。
+  * 自動化レベル（`OwnShip/autonomy_status` ch 50）：書く人がまだおらず、形式が決まっていない（PDU の表は `geometry_msgs/Twist`、設計書は JSON 文字列。K11）ので、
+    受け取った回数と時刻だけを出す（未受信は「no data」）。
+* 値の求め方は Godot の工学オーバレイと同じ（`ShipNav.h`）：物理の受信値（表示用に補間する前）の直近 5 s の最小二乗で速度と回頭角速度、位置と船首方位は最後の受信値。
+  CPA/TCPA・OZT は `cpa_ozt.hpp`（`hakoniwa-autonomy-ship` から `gen_fleet_config.py` が写す。閾値 926 m / 900 s、OZT の安全離隔 926 m・先読み 900 s）。
+* 表記は英語（エンジンの既定の字体に日本語の字形が無い）。
+* 検証：`-ShipHudLog=<csv>` で 1 s ごとの表示値を書き、`tools/compare_nav_hud.py` が trace から独立に同じ計算をして比べる（始まりの 6 s は除く：開始直後は物理が
+  遅れを取り戻すため数ステップずつ進み、Unreal が受け取れない標本がある）。60 s の結合試験で SOG 0.001 kn・COG 0.006°・ROT 0.08°/min・CPA 0.00003 NM、
+  衝突の危険の判定の食い違い 0、25 ms を超えるフレーム 0。
+* `-ShipShotViews=chase,bridge,foc`（`-ShipShot` と一緒に）：終わりに画面を順に切り替えて `<名前>_<画面>.png` を撮る。
+
 ## 場面（Step 1）
 
 | 要素 | 中身 |
@@ -161,7 +185,7 @@ pwsh scripts\windows\ship_scene.ps1 -Smoke                # （箱庭なし）
 2. ~~Step 3：海面を D4 の Gerstner 波で描く（時刻は D19）~~（済）
 3. ~~Step 4：新しい glb（塗装・上部構造物つき）を取り込み、Godot 側と見た目をそろえる~~（済）
 4. ~~Step 5：太陽光のまぶしさ・夜・航海灯~~（済）。残り：遠くの灯の見え方（画素より小さい灯）
-5. SHP-25：~~Step 1 船載カメラの PDU 書き戻し~~（済）、Step 2 ブリッジ視界・FOC 画面
+5. SHP-25：~~Step 1 船載カメラの PDU 書き戻し~~（済）、~~Step 2 ブリッジ視界・FOC 画面~~（済）。残り：自動化レベルの形式（K11）
 
 ## ライセンス
 

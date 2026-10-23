@@ -40,6 +40,9 @@ public:
 	int32 Width = 640;
 	int32 Height = 480;
 	double RateHz = 10.0;
+	FVector OriginFlu = FVector::ZeroVector;   // 取り付け位置（船体の座標、FLU）
+	/** 最後に撮った画像（FOC 画面に映す） */
+	UTextureRenderTarget2D* GetTarget() const { return Target; }
 
 	// 状況（AShipFleet が結合テストの終わりに出す）
 	int64 Captured = 0;

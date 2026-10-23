@@ -57,6 +57,7 @@ bool UShipCamera::Init(AActor* Ship, const TSharedPtr<FJsonObject>& Spec, double
 	Height = Spec->GetIntegerField(TEXT("height"));
 	RateHz = Spec->GetNumberField(TEXT("rate_hz"));
 	Phase = PhaseSec;
+	OriginFlu = JsonVec3(Spec, TEXT("origin"));
 	if (Spec->GetStringField(TEXT("encoding")) != TEXT("rgb8") || Width <= 0 || Height <= 0 || RateHz <= 0.0)
 	{
 		UE_LOG(LogShipCamera, Error, TEXT("%s: unsupported camera spec"), *FrameId);

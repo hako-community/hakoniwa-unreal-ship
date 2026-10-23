@@ -200,6 +200,38 @@ bool AShipFleet::LoadFleet()
 			S.Heave.SetNum(HeaveLags.Num());
 		}
 	}
+	// ブリッジ視界・FOC（SHP-25 Step 2）：表示する船（0 番が自船）と、Godot の工学オーバレイと同じ表示の値
+	const TSharedPtr<FJsonObject> Ov = Root->GetObjectField(TEXT("overlays"));
+	const FString OwnRobot = Ov->GetStringField(TEXT("own_ship"));
+	VelocityWindow = Ov->GetNumberField(TEXT("velocity_window_s"));
+	VectorMinutes = Ov->GetObjectField(TEXT("ais"))->GetNumberField(TEXT("vector_minutes"));
+	OztSafeDomainM = Ov->GetObjectField(TEXT("ozt"))->GetNumberField(TEXT("safe_domain_m"));
+	OztHorizonS = Ov->GetObjectField(TEXT("ozt"))->GetNumberField(TEXT("time_horizon_s"));
+	DisplayRangeM = Ov->GetObjectField(TEXT("ozt"))->GetNumberField(TEXT("display_range_m"));
+	const TSharedPtr<FJsonObject> Auto = Root->GetObjectField(TEXT("autonomy_status"));
+	AutonomyPdu = Auto->GetStringField(TEXT("pdu"));
+	const TArray<TSharedPtr<FJsonValue>>& ShipSpecs = Root->GetArrayField(TEXT("ships"));
+	Sync.StableSort([&OwnRobot](const FShipSync& A, const FShipSync& B) { return A.Actor->Robot == OwnRobot && B.Actor->Robot != OwnRobot; });
+	for (const FShipSync& S : Sync)
+	{
+		FShipView V;
+		V.Robot = S.Actor->Robot;
+		V.bOwn = V.Robot == OwnRobot;
+		for (const TSharedPtr<FJsonValue>& SV : ShipSpecs)
+		{
+			const TSharedPtr<FJsonObject> Spec = SV->AsObject();
+			if (Spec->GetStringField(TEXT("robot")) != V.Robot) { continue; }
+			const TSharedPtr<FJsonObject>* Ais = nullptr;
+			if (Spec->TryGetObjectField(TEXT("ais"), Ais))
+			{
+				(*Ais)->TryGetBoolField(TEXT("has_ais"), V.bAis);
+				(*Ais)->TryGetStringField(TEXT("name"), V.Name);
+			}
+			const TSharedPtr<FJsonObject> Ext = Spec->GetObjectField(TEXT("extent"));
+			V.LengthM = JsonVec3(Ext, TEXT("max")).X - JsonVec3(Ext, TEXT("min")).X;
+		}
+		ViewShips.Add(V);
+	}
 	UE_LOG(LogShipFleet, Log, TEXT("fleet %s: %d ships, %d PDUs, clock %s/%s, asset %s"), *Path, Ships.Num(), PduTable.Num(), *ClockRobot, *ClockPdu, *AssetName);
 	return Ships.Num() > 0;
 }
@@ -229,6 +261,29 @@ void AShipFleet::BeginPlay()
 	bNavLightCheck = FParse::Param(Cmd, TEXT("ShipNavLightCheck"));
 	FString CameraDump;
 	bCamerasOffline = FParse::Value(Cmd, TEXT("-ShipCameraDump="), CameraDump);
+	FParse::Value(Cmd, TEXT("-ShipHudLog="), HudLogPath);
+	FString ViewArg, ShotViewsArg;
+	FParse::Value(Cmd, TEXT("-ShipView="), ViewArg);
+	FParse::Value(Cmd, TEXT("-ShipShotViews="), ShotViewsArg, false);   // カンマで止めない
+	auto ParseView = [](const FString& S, EShipView& Out)
+	{
+		if (S == TEXT("free")) { Out = EShipView::Free; return true; }
+		if (S == TEXT("chase")) { Out = EShipView::Chase; return true; }
+		if (S == TEXT("bridge")) { Out = EShipView::Bridge; return true; }
+		if (S == TEXT("foc")) { Out = EShipView::Foc; return true; }
+		return false;
+	};
+	TArray<FString> Parts;
+	ShotViewsArg.ParseIntoArray(Parts, TEXT(","));
+	for (const FString& P : Parts)
+	{
+		EShipView V;
+		if (ParseView(P.TrimStartAndEnd(), V)) { ShotViews.Add(V); }
+	}
+	if (!ParseView(ViewArg, View))
+	{
+		View = bChase ? EShipView::Chase : EShipView::Free;
+	}
 	if (!LoadFleet())
 	{
 		if (CheckSec > 0.0)
@@ -384,10 +439,12 @@ bool AShipFleet::ReadJoints(UPduManager* Pdu, FShipSync& S, double& OutStamp)
 	}
 	S.JointNames.Reset();
 	S.NewJoints.Reset();
+	S.NewJointVel.Reset();
 	for (size_t i = 0; i < J.name.size(); ++i)
 	{
 		S.JointNames.Add(UTF8_TO_TCHAR(J.name[i].c_str()));
 		S.NewJoints.Add(i < J.position.size() ? J.position[i] : 0.0);
+		S.NewJointVel.Add(i < J.velocity.size() ? J.velocity[i] : 0.0);
 	}
 	S.bNewJoints = true;
 	++S.JointFrames;
@@ -406,6 +463,15 @@ void AShipFleet::PushSamples(FShipSync& S, double T)
 			S.Poses.Pop();
 		}
 		S.Poses.Add({ T, S.NewLinear, S.NewAngular, {} });
+		// 航海情報（SHP-25 Step 2）：物理時刻の受信値を窓 + 1 s 分だけ持つ
+		if (S.NavHist.Num() > 0 && S.NavHist.Last().T >= T)
+		{
+			S.NavHist.Pop();
+		}
+		S.NavHist.Add({ T, S.NewLinear.X, S.NewLinear.Y, S.NewAngular.Z });
+		int32 Old = 0;
+		while (Old < S.NavHist.Num() && T - S.NavHist[Old].T > VelocityWindow + 1.0) { ++Old; }
+		if (Old > 0) { S.NavHist.RemoveAt(0, Old); }
 	}
 	if (S.bNewJoints)
 	{
@@ -415,6 +481,7 @@ void AShipFleet::PushSamples(FShipSync& S, double T)
 			S.JointHist.Pop();
 		}
 		S.JointHist.Add({ T, FVector::ZeroVector, FVector::ZeroVector, S.NewJoints });
+		S.LastJointVel = S.NewJointVel;
 	}
 	constexpr int32 Keep = 32;
 	if (S.Poses.Num() > Keep) { S.Poses.RemoveAt(0, S.Poses.Num() - Keep); }
@@ -484,6 +551,7 @@ void AShipFleet::ApplyAt(FShipSync& S, double T)
 			Q.Add(k < B.Num() ? A[k] + Alpha * WrapPi(B[k] - A[k]) : A[k]);
 		}
 		S.Actor->ApplyJoints(S.JointNames, Q);
+		S.AppliedJoints = Q;
 		// 検証 3：関節の部品の角度を読み戻す（軸まわりの回転角。2π の折り返しは除く）
 		for (int32 k = 0; k < S.JointNames.Num() && k < Q.Num(); ++k)
 		{
@@ -785,6 +853,18 @@ void AShipFleet::FinishCheck(double PhysicsTime)
 		UE_LOG(LogShipFleet, Error, TEXT("HAKONIWA_UNREAL_SHIP_SYNC_FAILED %s : %s"), *Summary, *FString::Join(Problems, TEXT("; ")));
 	}
 	ExitCode = Problems.Num() == 0 ? 0 : 1;
+	if (!HudLogPath.IsEmpty())
+	{
+		const FString Csv = TEXT("t,robot,name,e,n,hdg_deg,sog_kt,cog_deg,rot_deg_min,range_nm,bearing_deg,cpa_nm,tcpa_min,risk,rudder_deg,prop_rpm\n") + FString::Join(HudLines, TEXT("\n")) + TEXT("\n");
+		FFileHelper::SaveStringToFile(Csv, *HudLogPath);
+	}
+	if (!ShotPath.IsEmpty() && ShotViews.Num() > 0)
+	{
+		ShotStep = 0;   // TickShotViews が画面を順に切り替えて撮る
+		ShotWait = 20;
+		SetView(ShotViews[0]);
+		return;
+	}
 	if (ShotPath.IsEmpty())
 	{
 		FPlatformMisc::RequestExitWithStatus(false, ExitCode);
@@ -914,6 +994,139 @@ void AShipFleet::CheckNavLights()
 	}
 }
 
+void AShipFleet::UpdateViewData(double T)
+{
+	// ブリッジ視界・FOC の値（SHP-25 Step 2）：各船の航海情報（物理時刻の受信値の最小二乗）と、自船から見た他船の CPA/TCPA/OZT
+	ViewTime = T;
+	for (int32 i = 0; i < Sync.Num() && i < ViewShips.Num(); ++i)
+	{
+		FShipView& V = ViewShips[i];
+		V.State = ShipNav::Estimate(Sync[i].NavHist, T, VelocityWindow);
+		if (V.State.bValid && T - Sync[i].LastTrailT >= 1.0)
+		{
+			Sync[i].LastTrailT = T;
+			V.Trail.Add(FVector2D(V.State.E, V.State.N));
+			if (V.Trail.Num() > 900) { V.Trail.RemoveAt(0); }
+		}
+	}
+	Targets.Reset();
+	if (ViewShips.Num() == 0 || !ViewShips[0].State.bValid)
+	{
+		return;
+	}
+	for (int32 i = 1; i < ViewShips.Num(); ++i)
+	{
+		ShipNav::FTarget Tg = ShipNav::Relative(ViewShips[0].State, ViewShips[i].State, OztSafeDomainM, OztHorizonS, OztSafeDomainM, OztHorizonS);
+		Tg.Robot = ViewShips[i].Robot;
+		Tg.Name = ViewShips[i].Name;
+		Tg.bAis = ViewShips[i].bAis;
+		Targets.Add(Tg);
+	}
+	// 自船の舵角・プロペラ回転数（joint_states：表示時刻の角度と、最後に受け取った速度）
+	const FShipSync& Own = Sync[0];
+	bHasJoints = Own.JointNames.Num() > 0;
+	for (int32 k = 0; k < Own.JointNames.Num(); ++k)
+	{
+		const FString& Name = Own.JointNames[k];
+		if (Name.Contains(TEXT("rudder")) && k < Own.AppliedJoints.Num())
+		{
+			RudderDeg = -FMath::RadiansToDegrees(Own.AppliedJoints[k]);   // 物理の舵角は左舵正（fleet_plant.hpp）。表示は右舵正
+		}
+		if (Name.Contains(TEXT("propeller")) && k < Own.LastJointVel.Num())
+		{
+			PropRpm = Own.LastJointVel[k] * 60.0 / (2.0 * UE_DOUBLE_PI);
+		}
+	}
+}
+
+void AShipFleet::WriteHudLog(double T)
+{
+	// 1 s ごとに、表示している航海情報を書く（tools/compare_nav_hud.py が物理の trace から同じ値を求めて比べる）
+	if (ViewShips.Num() == 0)
+	{
+		return;
+	}
+	const ShipNav::FState& O = ViewShips[0].State;
+	HudLines.Add(FString::Printf(TEXT("%.6f,%s,%s,%.3f,%.3f,%.4f,%.5f,%.4f,%.4f,,,,,,%.4f,%.3f"), T, *ViewShips[0].Robot, *ViewShips[0].Name,
+		O.E, O.N, O.HeadingDeg, O.SogKt, O.CogDeg, O.RotDegMin, RudderDeg, PropRpm));
+	for (int32 i = 0; i < Targets.Num(); ++i)
+	{
+		const ShipNav::FTarget& Tg = Targets[i];
+		const ShipNav::FState& S = ViewShips[i + 1].State;
+		HudLines.Add(FString::Printf(TEXT("%.6f,%s,%s,%.3f,%.3f,%.4f,%.5f,%.4f,%.4f,%.6f,%.4f,%.6f,%.5f,%d,,"), T, *Tg.Robot, *Tg.Name,
+			S.E, S.N, S.HeadingDeg, S.SogKt, S.CogDeg, S.RotDegMin, Tg.RangeNm, Tg.BearingDeg, Tg.Cpa.cpa_distance_nm, Tg.Cpa.tcpa_minutes, Tg.Cpa.collision_risk ? 1 : 0));
+	}
+}
+
+void AShipFleet::SetView(EShipView V)
+{
+	// 画面の切り替え（キー 1/2/3/0 は AShipHud が呼ぶ）。FOC は追うカメラの上に表示板を重ねる
+	View = V;
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC)
+	{
+		return;
+	}
+	bChase = V == EShipView::Chase || V == EShipView::Foc;
+	AShipActor* Own = Sync.Num() > 0 ? Sync[0].Actor : nullptr;
+	if (V == EShipView::Bridge && Own)
+	{
+		if (!BridgeCam)
+		{
+			// 船橋カメラの取り付け位置（fleet_ue.json の cameras の bridge）に人の目の画角のカメラ。船と一緒に揺れる
+			FVector Origin = FVector(-30.0, 0.0, 15.0);
+			for (const UShipCamera* Cam : Cameras)
+			{
+				if (Cam->FrameId.Contains(TEXT("bridge"))) { Origin = Cam->OriginFlu; }
+			}
+			BridgeCam = NewObject<UCameraComponent>(Own, TEXT("BridgeView"));
+			BridgeCam->SetupAttachment(Own->GetRootComponent());
+			// 目は船橋カメラの筐体の 0.5 m 前（操舵室は窓の無い閉じた箱なので、中からは壁しか見えない。筐体の中だと箱の内側が写る）
+			BridgeCam->SetRelativeLocation(ShipFrame::LocalToUnreal(Origin + FVector(0.5, 0.0, 0.0)));
+			BridgeCam->SetFieldOfView(75.0f);
+			BridgeCam->RegisterComponent();
+			Own->AddInstanceComponent(BridgeCam);
+		}
+		PC->SetViewTarget(Own);
+	}
+	else if (V == EShipView::Free)
+	{
+		PC->SetViewTarget(PC->GetPawn());
+	}
+	UE_LOG(LogShipFleet, Log, TEXT("view: %d"), static_cast<int32>(V));
+}
+
+void AShipFleet::TickShotViews()
+{
+	// 終わりの撮影（-ShipShotViews）：画面を切り替え、20 フレーム待って撮り、10 フレーム待って次へ。全部撮ったら終わる
+	if (--ShotWait > 0)
+	{
+		return;
+	}
+	if (ShotStep % 2 == 0)
+	{
+		const int32 i = ShotStep / 2;
+		static const TCHAR* Names[] = { TEXT("free"), TEXT("chase"), TEXT("bridge"), TEXT("foc") };
+		const FString File = FPaths::Combine(FPaths::GetPath(ShotPath), FPaths::GetBaseFilename(ShotPath) + TEXT("_") + Names[static_cast<int32>(ShotViews[i])] + TEXT(".png"));
+		FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(File), true, false);
+		UE_LOG(LogShipFleet, Log, TEXT("shot -> %s"), *File);
+		ShotWait = 10;
+	}
+	else
+	{
+		const int32 Next = ShotStep / 2 + 1;
+		if (Next >= ShotViews.Num())
+		{
+			ShotStep = -1;
+			FPlatformMisc::RequestExitWithStatus(false, ExitCode);
+			return;
+		}
+		SetView(ShotViews[Next]);
+		ShotWait = 20;
+	}
+	++ShotStep;
+}
+
 void AShipFleet::UpdateChase(float DeltaSeconds)
 {
 	// 自船（最初の船）の後ろ 160 m・上 45 m から、船の少し上を見る。向きは方位だけ（揺れは追わない）でなめらかに
@@ -964,13 +1177,34 @@ void AShipFleet::Tick(float DeltaSeconds)
 	{
 		FPlatformMisc::RequestExitWithStatus(false, ExitCode);
 	}
-	if (!bSync && bCamerasOffline)
+	if (ShotStep >= 0)
 	{
-		// つながないとき（-ShipCameraDump）：ゲームの時刻で撮り、PDU には書かずに保存だけする
-		for (UShipCamera* Cam : Cameras)
+		TickShotViews();
+	}
+	if (!bInitialView)
+	{
+		bInitialView = true;
+		SetView(View);
+	}
+	if (!bSync)
+	{
+		// つながないとき：船は置いたまま（ゲームの時刻で航海情報を出す）。カメラは -ShipCameraDump か FOC 画面のときだけ撮り、PDU には書かない
+		const double T = GetWorld()->GetTimeSeconds();
+		for (FShipSync& S : Sync)
 		{
-			Cam->MaybeCapture(GetWorld()->GetTimeSeconds());
-			Cam->Poll(nullptr);
+			FVector L, A;
+			S.Actor->ReadBackPose(L, A);
+			S.NavHist.Add({ T, L.X, L.Y, A.Z });
+			while (S.NavHist.Num() > 2 && T - S.NavHist[0].T > VelocityWindow) { S.NavHist.RemoveAt(0); }
+		}
+		UpdateViewData(T);
+		if (bCamerasOffline || View == EShipView::Foc)
+		{
+			for (UShipCamera* Cam : Cameras)
+			{
+				Cam->MaybeCapture(T);
+				Cam->Poll(nullptr);
+			}
 		}
 	}
 	if (!bSync || bDone)
@@ -1018,6 +1252,11 @@ void AShipFleet::Tick(float DeltaSeconds)
 		}
 	}
 	ReadDisturbance(Pdu);
+	if (!AutonomyPdu.IsEmpty() && Pdu->ReadPduRawData(ViewShips.Num() > 0 ? ViewShips[0].Robot : FString(), AutonomyPdu, Buf) && Buf.Num() > 0)
+	{
+		++AutonomyFrames;   // 中身の形式は未定（K11）。受け取ったことだけを FOC に出す
+		AutonomyLastT = LastPhysicsTime;
+	}
 	if (Stamp < 0.0)
 	{
 		// 新しい joint_states が無いフレーム（描画が物理の 50 Hz より速いと大半）
@@ -1066,6 +1305,12 @@ void AShipFleet::Tick(float DeltaSeconds)
 	{
 		Cam->MaybeCapture(DisplayTime);
 		Cam->Poll(Pdu);
+	}
+	UpdateViewData(DisplayTime);
+	if (!HudLogPath.IsEmpty() && DisplayTime >= NextHudLog && DisplayTime >= FirstDisplayTime + 1.0)
+	{
+		NextHudLog = FMath::FloorToDouble(DisplayTime) + 1.0;
+		WriteHudLog(DisplayTime);
 	}
 	// 標本は始まって 1 s 後から（開始直後は物理が遅れを取り戻すため時刻が数ステップずつ飛び、最初の pos の時刻が決められない）
 	if (!SamplesPath.IsEmpty() && DisplayTime >= FirstDisplayTime + 1.0 && DisplayTime - LastSampleTime >= SampleInterval - 1e-9)

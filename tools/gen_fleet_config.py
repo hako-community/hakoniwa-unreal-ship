@@ -8,12 +8,14 @@
   ../hakoniwa-godot-ship/Models/<model>/ship_sync.profile.json   関節名・ノード名・回転軸（FLU）
   ../hakoniwa-godot-ship/tests/integration/plant_coupling/expected.json   結合テストの期待値（波浪・船の水線面の範囲・閾値、Step 3）
   ../hakoniwa-mujoco-ship/include/ship/environment/wave_spectrum.hpp     物理と同じ波面の計算（D4、Step 3）
+  ../hakoniwa-mujoco-ship/include/ship/autonomy/cpa_ozt.hpp               CPA/TCPA/OZT の計算（SHP-25 Step 2。Godot の cpa_ozt.gd と同じ元）
   ../../images/image2sim-framework/output/<model>/resolved_config.json  航海灯（色・射光範囲・視認距離、Step 5）。
                                                                          物理（ship_plant の models_dir）と同じ船舶生成器の出力。glb のノードには載っていない
 
 出力（コミット対象）:
   Config/Fleet/fleet_ue.json
   Source/HakoniwaShip/Public/ThirdParty/wave_spectrum.hpp（物理の wave_spectrum.hpp の写し。内容は変えない）
+  Source/HakoniwaShip/Public/ThirdParty/cpa_ozt.hpp（物理の cpa_ozt.hpp の写し。内容は変えない）
   SourceArt/Ships/<model>.glb（Godot ビューアの glb の写し。場面づくり（ship_scene.ps1 -Build）が部品ごとの StaticMesh にする、Step 4）
   座標はすべて FLU（右手系 m、x 前・y 左・z 上）。glb（glTF、Y 上）からは x = -Z, y = -X, z = +Y で戻す
   （Godot の hakoniwa_robot_sync の x→-Z, y→-X, z→+Y の逆）。Unreal への写像は ShipFrame.h。
@@ -37,9 +39,12 @@ GODOT = SHIPNAVI / "hakoniwa-godot-ship"
 OUT = PROJECT / "Config" / "Fleet" / "fleet_ue.json"
 WAVE_SRC = SHIPNAVI / "hakoniwa-mujoco-ship" / "include" / "ship" / "environment" / "wave_spectrum.hpp"
 WAVE_OUT = PROJECT / "Source" / "HakoniwaShip" / "Public" / "ThirdParty" / "wave_spectrum.hpp"
+CPA_SRC = SHIPNAVI / "hakoniwa-mujoco-ship" / "include" / "ship" / "autonomy" / "cpa_ozt.hpp"
+CPA_OUT = PROJECT / "Source" / "HakoniwaShip" / "Public" / "ThirdParty" / "cpa_ozt.hpp"
 GLB_OUT = PROJECT / "SourceArt" / "Ships"
 SHIP_SPECS = SHIPNAVI.parent / "images" / "image2sim-framework" / "output"
 # 船載カメラ（SHP-25）：船舶生成器の取り付け位置（mounts の camera_rgb）→ 書き戻す PDU（pdu_config_ship.json）
+AUTONOMY_PDU = "autonomy_status"
 CAMERA_PDUS = {"camera_bow_center": "camera_bow", "camera_bridge_front": "camera_bridge"}
 CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_RATE_HZ = 640, 480, 10.0
 # 取り付け位置は船舶生成器のカメラの筐体（上部構造物のメッシュの暗い箱、前へ最大 0.58 m）の中。筐体を写さないよう手前を切る [m]
@@ -271,6 +276,9 @@ def build() -> dict:
         wanted.append((clock["robot"], clock["pdu"]))
     dist = fleet["disturbance"]
     wanted.append((dist["robot"], dist["pdu"]))
+    # 自動化レベル（SHP-25 Step 2 の FOC 画面）：受け取ったかだけを出す（中身の形式は未定、K11）
+    own = fleet["overlays"]["own_ship"]
+    wanted.append((own, AUTONOMY_PDU))
     cams = cameras(fleet, ships)
     pdus = []
     for robot, name in wanted:
@@ -297,6 +305,9 @@ def build() -> dict:
             "preview": fleet["preview_wave"],
         },
         "plant_check": plant_check(),
+        # ブリッジ視界・FOC の表示（SHP-25 Step 2）：Godot の工学オーバレイと同じ値（速度の推定の窓・OZT・ベクトルの長さ・航跡）
+        "overlays": {k: fleet["overlays"][k] for k in ("own_ship", "velocity_window_s", "trail", "ais", "ozt")},
+        "autonomy_status": {"robot": fleet["overlays"]["own_ship"], "pdu": AUTONOMY_PDU},
         "cameras": cams,
         "pdus": pdus,
         "ships": ships,
@@ -406,11 +417,13 @@ def main() -> int:
     a = ap.parse_args()
     text = json.dumps(build(), ensure_ascii=False, indent=2) + "\n"
     wave = WAVE_SRC.read_bytes()
+    cpa = CPA_SRC.read_bytes()
     models = sorted({s["model"] for s in load_json(GODOT / "config" / "fleet.json")["ships"]})
     glbs = {GLB_OUT / f"{m}.glb": (GODOT / "Models" / m / f"{m}.glb").read_bytes() for m in models}
     if a.check:
         pairs = [(OUT, OUT.exists() and OUT.read_text(encoding="utf-8") == text),
-                 (WAVE_OUT, WAVE_OUT.exists() and WAVE_OUT.read_bytes() == wave)]
+                 (WAVE_OUT, WAVE_OUT.exists() and WAVE_OUT.read_bytes() == wave),
+                 (CPA_OUT, CPA_OUT.exists() and CPA_OUT.read_bytes() == cpa)]
         pairs += [(f, f.exists() and f.read_bytes() == b) for f, b in glbs.items()]
         stale = [str(f) for f, ok in pairs if not ok]
         if stale:
@@ -422,6 +435,7 @@ def main() -> int:
     OUT.write_text(text, encoding="utf-8")
     WAVE_OUT.parent.mkdir(parents=True, exist_ok=True)
     WAVE_OUT.write_bytes(wave)
+    CPA_OUT.write_bytes(cpa)
     GLB_OUT.mkdir(parents=True, exist_ok=True)
     for f, b in glbs.items():
         f.write_bytes(b)

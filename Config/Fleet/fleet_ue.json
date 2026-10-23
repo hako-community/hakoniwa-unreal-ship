@@ -53,6 +53,29 @@
       }
     }
   },
+  "overlays": {
+    "own_ship": "OwnShip",
+    "velocity_window_s": 5.0,
+    "trail": {
+      "sample_interval_s": 1.0,
+      "max_points": 900,
+      "width_px": 2.0
+    },
+    "ais": {
+      "vector_minutes": 6.0,
+      "width_px": 3.0
+    },
+    "ozt": {
+      "safe_domain_m": 926.0,
+      "time_horizon_s": 900.0,
+      "update_interval_s": 0.2,
+      "display_range_m": 3000.0
+    }
+  },
+  "autonomy_status": {
+    "robot": "OwnShip",
+    "pdu": "autonomy_status"
+  },
   "cameras": [
     {
       "robot": "OwnShip",
@@ -140,6 +163,13 @@
       "pdu": "maritime_disturbance",
       "type": "hako_msgs/Disturbance",
       "channel_id": 4,
+      "pdu_size": 256
+    },
+    {
+      "robot": "OwnShip",
+      "pdu": "autonomy_status",
+      "type": "geometry_msgs/Twist",
+      "channel_id": 50,
       "pdu_size": 256
     },
     {

@@ -10,6 +10,7 @@
 #   2) アクタから読み戻した姿勢（-ShipSamples）を ship_plant の --trace と照合（tools\compare_plant_trace.py）→ HAKONIWA_UNREAL_SHIP_TRACE_OK
 #   3) 船載カメラ（SHP-25）：受け手のアセット（tools\check_camera_pdu.py）が 2 台の画像 PDU を読み、数・時刻・形式を確かめ（CAMERA_PDU_OK）、
 #      船橋カメラの水平線を同じ時刻の姿勢から求めた位置と比べる（tools\compare_camera_horizon.py → CAMERA_HORIZON_OK）
+#   4) ブリッジ視界・FOC の航海情報（SHP-25 Step 2）：1 s ごとの値（-ShipHudLog）を trace から独立に求めた値と比べる（tools\compare_nav_hud.py → HAKONIWA_UNREAL_SHIP_NAV_OK）
 # 両方 OK なら HAKONIWA_UNREAL_SHIP_PLANT_OK を出して 0 で終わる。ログは Saved\ShipLogs\plant_<時刻>\。
 # -Screenshot を付けると終了の少し前に画面を撮る（Saved\ShipLogs\plant_<時刻>\view.png、目視確認用）。
 [CmdletBinding()]
@@ -46,6 +47,7 @@ $env:PATH = "$MujocoBin;" + $env:PATH
 $trace = Join-Path $runDir 'plant_trace.csv'
 $samples = Join-Path $runDir 'ue_samples.csv'
 $ueLog = Join-Path $runDir 'unreal.log'
+$hudLog = Join-Path $runDir 'hud_log.csv'
 
 $procs = @()
 function Start-Logged($name, $exe, $argList) {
@@ -74,9 +76,10 @@ try {
     Start-Logged 'camera' $Python @('-u', $CamCheck, $PduConfig, $FleetUe, $camDir, '--duration', "$([Math]::Max(10, $CheckSec - 5))") | Out-Null
     Start-Sleep -Seconds 3
     $ueArgs = @($ShipUproject, $ShipMap, '-game', '-unattended', '-nosplash', '-windowed', "-ResX=$ResX", "-ResY=$ResY",
-        '-ShipSync', '-ShipHakoStart', "-ShipSyncCheck=$CheckSec", "-ShipSamples=$samples", "-abslog=$ueLog")
+        '-ShipSync', '-ShipHakoStart', "-ShipSyncCheck=$CheckSec", "-ShipSamples=$samples", "-ShipHudLog=$hudLog", "-abslog=$ueLog")
     $ueArgs += $ExtraArgs
-    if ($Screenshot) { $ueArgs += "-ShipShot=$(Join-Path $runDir 'view.png')" }
+    # 終わりに 3 つの画面を撮る（view_chase.png・view_bridge.png・view_foc.png。SHP-25 Step 2）
+    if ($Screenshot) { $ueArgs += @("-ShipShot=$(Join-Path $runDir 'view.png')", '-ShipShotViews=chase,bridge,foc') }
     Write-Host "[plant-test] $ShipEditor $($ueArgs -join ' ')"
     $ue = Start-Process -FilePath $ShipEditor -ArgumentList $ueArgs -PassThru
     $script:procs += $ue
@@ -116,6 +119,14 @@ if ((Test-Path $trace) -and (Test-Path $samples)) {
     Write-Host "trace or samples missing: $trace / $samples"
 }
 Write-Host '----- camera -----'
+Write-Host '----- navigation (bridge view / FOC) -----'
+$navOk = $false
+if ((Test-Path $trace) -and (Test-Path $hudLog)) {
+    & $Python -I (Join-Path $ShipRoot 'tools\compare_nav_hud.py') $trace $hudLog
+    $navOk = ($LASTEXITCODE -eq 0)
+} else {
+    Write-Host "trace or hud log missing: $hudLog"
+}
 $camOk = [bool](Select-String -Path (Join-Path $runDir 'camera.log') -Pattern '^CAMERA_PDU_OK' -Quiet -ErrorAction SilentlyContinue)
 Select-String -Path (Join-Path $runDir 'camera.log') -Pattern '^  camera_|^CAMERA_PDU' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.Line }
 $horizonOk = $false
@@ -123,9 +134,9 @@ if (Test-Path $trace) {
     & $Python -I $CamHorizon $trace $FleetUe $camDir | Select-Object -Last 4
     $horizonOk = ($LASTEXITCODE -eq 0)
 }
-if ($syncOk -and $traceOk -and $dllOk -and $camOk -and $horizonOk) {
+if ($syncOk -and $traceOk -and $dllOk -and $camOk -and $horizonOk -and $navOk) {
     Write-Host "HAKONIWA_UNREAL_SHIP_PLANT_OK ($runDir)"
     exit 0
 }
-Write-Host "HAKONIWA_UNREAL_SHIP_PLANT_FAILED sync=$syncOk trace=$traceOk shakoc=$dllOk camera=$camOk horizon=$horizonOk ($runDir)"
+Write-Host "HAKONIWA_UNREAL_SHIP_PLANT_FAILED sync=$syncOk trace=$traceOk shakoc=$dllOk camera=$camOk horizon=$horizonOk nav=$navOk ($runDir)"
 exit 1

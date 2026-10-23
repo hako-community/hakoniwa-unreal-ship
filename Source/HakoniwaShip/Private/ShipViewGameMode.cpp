@@ -2,6 +2,7 @@
 
 #include "ShipViewGameMode.h"
 
+#include "ShipHud.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpectatorPawn.h"
 #include "HAL/PlatformTime.h"
@@ -15,6 +16,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogShipView, Log, All);
 AShipViewGameMode::AShipViewGameMode()
 {
 	DefaultPawnClass = ASpectatorPawn::StaticClass();
+	HUDClass = AShipHud::StaticClass();   // ブリッジ視界・FOC（SHP-25 Step 2）
 	PrimaryActorTick.bCanEverTick = true;
 }
 

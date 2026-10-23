@@ -18,6 +18,9 @@
 //   -ShipNavLightCheck        夜（-ShipNight）に、各船の航海灯を周り 36 方位から撮り、射光範囲（COLREG 第 21 条）の内だけ光るかを確かめる
 //                             （HAKONIWA_UNREAL_SHIP_NAVLIGHT_OK / _FAILED。始まって 60 フレーム後に 1 回）
 //   -ShipCameraDump=<dir>     船載カメラ（SHP-25）の画像を 2 s ごとに PNG で保存（箱庭につながないときもこれで撮る）
+//   -ShipView=free|chase|bridge|foc  始めの画面（SHP-25 Step 2。実行中はキー 1 追う・2 船橋・3 FOC・0 自由）
+//   -ShipShotViews=chase,bridge,foc  -ShipShot の代わりに、終わりに画面ごとに撮る（<ShipShot の名前>_<画面>.png）
+//   -ShipHudLog=<csv>         ブリッジ視界・FOC に出す航海情報を 1 s ごとに書く（tools/compare_nav_hud.py が物理の trace と照合する）
 //   -ShipFrameLog=<csv>       フレームごとの壁時計・物理時刻・表示時刻（カクつきの調査用。-ShipSyncCheck の終わりに書く）
 //
 // 表示時刻（Step 3）：物理は 50 Hz、描画は 130〜200 FPS。受信した値をそのまま描くと 2〜4 フレームごとに飛んでカクつくので、
@@ -35,6 +38,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "HakoniwaObjectInterface.h"
+#include "ShipNav.h"
 #include "ShipWave.h"
 #include "ShipFleet.generated.h"
 
@@ -58,6 +62,10 @@ struct FShipPduRead
 	bool bWrite = false;   // ビューアが書く PDU（船載カメラ、SHP-25）
 };
 
+/** 画面（SHP-25 Step 2）：自由（観客）・自船を追う・船橋からの視界・FOC（陸上監視センター） */
+UENUM()
+enum class EShipView : uint8 { Free, Chase, Bridge, Foc };
+
 UCLASS()
 class HAKONIWASHIP_API AShipFleet : public AActor, public IHakoniwaObjectInterface
 {
@@ -76,6 +84,32 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Ship") FString FleetConfig = TEXT("Config/Fleet/fleet_ue.json");
 
 	UPROPERTY(VisibleAnywhere, Category = "Ship") TArray<TObjectPtr<AShipActor>> Ships;
+
+	// ---- ブリッジ視界・FOC（SHP-25 Step 2）が読む値。毎フレーム表示時刻で更新する ----
+	struct FShipView
+	{
+		FString Robot;
+		FString Name;        // AIS の船名（無ければ空）
+		bool bOwn = false;
+		bool bAis = false;
+		double LengthM = 0.0;
+		ShipNav::FState State;
+		TArray<FVector2D> Trail;   // 航跡（東, 北）[m]、1 s ごと
+	};
+	TArray<FShipView> ViewShips;          // Ships と同じ順。0 番が自船
+	TArray<ShipNav::FTarget> Targets;     // 自船から見た他船（ViewShips[1..] の順）
+	double RudderDeg = 0.0;               // 舵角（右舵が正。物理の舵角は左舵正）
+	double PropRpm = 0.0;                 // プロペラ回転数
+	bool bHasJoints = false;
+	double ViewTime = -1.0;               // 表示の時刻（物理時刻の軸）
+	int64 AutonomyFrames = 0;             // autonomy_status（ch 50）を受け取った数（形式は未定、K11）
+	double AutonomyLastT = -1.0;
+	double VectorMinutes = 6.0, OztSafeDomainM = 926.0, OztHorizonS = 900.0, DisplayRangeM = 3000.0;
+	AShipOcean* GetOcean() const { return Ocean; }
+	const TArray<TObjectPtr<UShipCamera>>& GetCameras() const { return Cameras; }
+	bool IsSynced() const { return bSync; }
+	EShipView GetView() const { return View; }
+	void SetView(EShipView V);
 
 private:
 	/** 船体の上下位置 z と海面 η（船体の水線面の平均）の相関の累積（Godot の plant_coupling_check.gd と同じ） */
@@ -113,12 +147,17 @@ private:
 		// 受信の履歴（表示時刻で補間する）と、このフレームで読めた値
 		TArray<FShipSample> Poses;
 		TArray<FShipSample> JointHist;
+		TArray<ShipNav::FSample> NavHist;   // 航海情報の推定に使う受信値（物理時刻つき、窓 + 1 s 分）
+		double LastTrailT = -1.0e9;
+		TArray<double> LastJointVel;        // 最後に受け取った関節の速度 [rad/s]
+		TArray<double> AppliedJoints;       // 表示時刻で置いた関節の角度 [rad]
 		TArray<FString> JointNames;
 		bool bNewPose = false;
 		FVector NewLinear = FVector::ZeroVector;
 		FVector NewAngular = FVector::ZeroVector;
 		bool bNewJoints = false;
 		TArray<double> NewJoints;
+		TArray<double> NewJointVel;
 	};
 
 	bool LoadFleet();
@@ -138,6 +177,9 @@ private:
 	void LogStatus(double PhysicsTime);
 	void FinishCheck(double PhysicsTime);
 	void UpdateChase(float DeltaSeconds);
+	void UpdateViewData(double T);
+	void WriteHudLog(double T);
+	void TickShotViews();
 	void CheckNavLights();
 
 	FString AssetName = TEXT("UnrealShipViewer");
@@ -204,6 +246,16 @@ private:
 	FString FrameLogPath;          // -ShipFrameLog=<csv>：フレームごとの壁時計・物理時刻（カクつきの調査用）
 	TArray<FString> FrameLines;
 	bool bChase = false;
+	EShipView View = EShipView::Free;
+	bool bInitialView = false;
+	double VelocityWindow = 5.0;
+	FString HudLogPath;
+	TArray<FString> HudLines;
+	double NextHudLog = 0.0;
+	TArray<EShipView> ShotViews;   // 終わりに撮る画面（-ShipShotViews）
+	int32 ShotStep = -1;
+	int32 ShotWait = 0;
+	FString AutonomyPdu;           // autonomy_status（読むだけ）
 	bool bChaseTowardLight = false;
 	bool bNavLightCheck = false;
 	int32 NavLightCheckFrames = 0;
@@ -211,6 +263,7 @@ private:
 	int32 ExitCode = 0;
 
 	UPROPERTY() TObjectPtr<UCameraComponent> ChaseCam;
+	UPROPERTY() TObjectPtr<UCameraComponent> BridgeCam;   // 自船の船橋カメラの位置（人の目の画角）
 	UPROPERTY() TObjectPtr<AShipOcean> Ocean;
 	UPROPERTY() TObjectPtr<AShipLighting> Lighting;
 	UPROPERTY() TArray<TObjectPtr<UShipCamera>> Cameras;   // 船載カメラ（SHP-25。fleet_ue.json の cameras）
