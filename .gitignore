@@ -95,3 +95,4 @@ DerivedDataCache/*
 # 船の場面の生成物（scripts/windows/ship_scene.ps1 -Build が作る。clone のあとに各自の PC で作る）
 /Content/Ship/Levels/
 /Content/Ship/Generated/
+__pycache__/
