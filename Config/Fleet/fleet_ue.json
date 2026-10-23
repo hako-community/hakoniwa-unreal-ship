@@ -1,0 +1,1342 @@
+{
+  "version": 1,
+  "generated_by": "tools/gen_fleet_config.py (from hakoniwa-godot-ship/config/fleet.json, pdu_config_ship.json, Models/*.glb)",
+  "asset_name": "UnrealShipViewer",
+  "physics_clock": {
+    "robot": "OwnShip",
+    "pdu": "joint_states"
+  },
+  "pdus": [
+    {
+      "robot": "OwnShip",
+      "pdu": "pos",
+      "type": "geometry_msgs/Twist",
+      "channel_id": 0,
+      "pdu_size": 72
+    },
+    {
+      "robot": "OwnShip",
+      "pdu": "joint_states",
+      "type": "sensor_msgs/JointState",
+      "channel_id": 3,
+      "pdu_size": 1024
+    },
+    {
+      "robot": "TargetShip01",
+      "pdu": "pos",
+      "type": "geometry_msgs/Twist",
+      "channel_id": 21,
+      "pdu_size": 72
+    },
+    {
+      "robot": "TargetShip02",
+      "pdu": "pos",
+      "type": "geometry_msgs/Twist",
+      "channel_id": 22,
+      "pdu_size": 72
+    },
+    {
+      "robot": "TargetShipFishing",
+      "pdu": "pos",
+      "type": "geometry_msgs/Twist",
+      "channel_id": 23,
+      "pdu_size": 72
+    }
+  ],
+  "ships": [
+    {
+      "robot": "OwnShip",
+      "model": "container_749gt",
+      "pos_pdu": "pos",
+      "preview_pose": {
+        "linear": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "angular": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "extent": {
+        "min": [
+          -47.408501,
+          -7.22,
+          -3.8
+        ],
+        "max": [
+          49.501297,
+          7.22,
+          21.4
+        ]
+      },
+      "parts": [
+        {
+          "node": "cargo",
+          "box_min": [
+            -25.1,
+            -6.375,
+            3.752254
+          ],
+          "box_max": [
+            25.860001,
+            6.375,
+            13.051117
+          ],
+          "color": [
+            0.2,
+            0.38,
+            0.62
+          ]
+        },
+        {
+          "node": "deck_fittings",
+          "box_min": [
+            -47.408501,
+            -7.025,
+            3.7
+          ],
+          "box_max": [
+            49.501297,
+            7.025,
+            7.229999
+          ],
+          "color": [
+            0.45,
+            0.45,
+            0.45
+          ]
+        },
+        {
+          "node": "hull",
+          "box_min": [
+            -47.383499,
+            -7.0,
+            -3.8
+          ],
+          "box_max": [
+            49.426498,
+            7.0,
+            5.9
+          ],
+          "color": [
+            0.55,
+            0.13,
+            0.12
+          ]
+        },
+        {
+          "node": "hull_appendages",
+          "box_min": [
+            -42.02,
+            -2.455134,
+            -3.8
+          ],
+          "box_max": [
+            47.400002,
+            2.455134,
+            0.084
+          ],
+          "color": [
+            0.35,
+            0.12,
+            0.1
+          ]
+        },
+        {
+          "node": "navlight_masthead_light",
+          "box_min": [
+            -36.12,
+            -0.12,
+            20.4
+          ],
+          "box_max": [
+            -35.88,
+            0.12,
+            20.6
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_port_light",
+          "box_min": [
+            -34.62,
+            6.98,
+            14.4
+          ],
+          "box_max": [
+            -34.38,
+            7.22,
+            14.6
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_starboard_light",
+          "box_min": [
+            -34.62,
+            -7.22,
+            14.4
+          ],
+          "box_max": [
+            -34.38,
+            -6.98,
+            14.6
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_stern_light",
+          "box_min": [
+            -45.62,
+            -0.12,
+            5.4
+          ],
+          "box_max": [
+            -45.38,
+            0.12,
+            5.6
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "superstructure",
+          "box_min": [
+            -47.099998,
+            -7.18,
+            4.015222
+          ],
+          "box_max": [
+            44.580002,
+            7.18,
+            21.4
+          ],
+          "color": [
+            0.92,
+            0.92,
+            0.9
+          ]
+        }
+      ],
+      "joints": [
+        {
+          "name": "joint_propeller_main_prop",
+          "node": "propeller_main_prop",
+          "type": "spin",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "origin": [
+            -42.5,
+            0.0,
+            -2.2
+          ],
+          "part": {
+            "node": "propeller_main_prop",
+            "box_min": [
+              -0.96,
+              -1.6,
+              -1.6
+            ],
+            "box_max": [
+              0.48,
+              1.6,
+              1.6
+            ],
+            "color": [
+              0.78,
+              0.62,
+              0.3
+            ]
+          }
+        },
+        {
+          "name": "joint_radar_radar_sband",
+          "node": "radar_mast_radar_sband",
+          "type": "spin",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            -36.0,
+            0.0,
+            18.0
+          ],
+          "part": {
+            "node": "radar_mast_radar_sband",
+            "box_min": [
+              -0.175,
+              -1.8,
+              -0.15
+            ],
+            "box_max": [
+              0.175,
+              1.8,
+              0.28
+            ],
+            "color": [
+              0.85,
+              0.85,
+              0.85
+            ]
+          }
+        },
+        {
+          "name": "joint_radar_radar_xband",
+          "node": "radar_mast_radar_xband",
+          "type": "spin",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            -36.0,
+            0.0,
+            20.5
+          ],
+          "part": {
+            "node": "radar_mast_radar_xband",
+            "box_min": [
+              -0.175,
+              -1.2,
+              -0.15
+            ],
+            "box_max": [
+              0.175,
+              1.2,
+              0.28
+            ],
+            "color": [
+              0.85,
+              0.85,
+              0.85
+            ]
+          }
+        },
+        {
+          "name": "joint_rudder_main_rudder",
+          "node": "rudder_main_rudder",
+          "type": "hinge",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            -44.799999,
+            0.0,
+            -1.9
+          ],
+          "part": {
+            "node": "rudder_main_rudder",
+            "box_min": [
+              -1.462252,
+              -0.186147,
+              -1.723369
+            ],
+            "box_max": [
+              0.62668,
+              0.186147,
+              2.523369
+            ],
+            "color": [
+              0.3,
+              0.1,
+              0.08
+            ]
+          }
+        }
+      ],
+      "ais": {
+        "has_ais": true,
+        "mmsi": 431000001,
+        "name": "SUZAKU"
+      },
+      "joint_states_pdu": "joint_states"
+    },
+    {
+      "robot": "TargetShip01",
+      "model": "container_700teu",
+      "pos_pdu": "pos",
+      "preview_pose": {
+        "linear": [
+          3200.0,
+          150.0,
+          0.0
+        ],
+        "angular": [
+          0.0,
+          0.0,
+          3.14159
+        ]
+      },
+      "extent": {
+        "min": [
+          -65.525002,
+          -10.72,
+          -6.0
+        ],
+        "max": [
+          68.604759,
+          10.72,
+          28.2
+        ]
+      },
+      "parts": [
+        {
+          "node": "cargo",
+          "box_min": [
+            -36.52,
+            -8.865,
+            4.526886
+          ],
+          "box_max": [
+            40.02,
+            8.865,
+            16.842915
+          ],
+          "color": [
+            0.2,
+            0.38,
+            0.62
+          ]
+        },
+        {
+          "node": "deck_fittings",
+          "box_min": [
+            -65.525002,
+            -10.525,
+            4.5
+          ],
+          "box_max": [
+            68.604759,
+            10.525,
+            8.889999
+          ],
+          "color": [
+            0.45,
+            0.45,
+            0.45
+          ]
+        },
+        {
+          "node": "hull",
+          "box_min": [
+            -65.5,
+            -10.5,
+            -6.0
+          ],
+          "box_max": [
+            68.5,
+            10.5,
+            7.3
+          ],
+          "color": [
+            0.55,
+            0.13,
+            0.12
+          ]
+        },
+        {
+          "node": "hull_appendages",
+          "box_min": [
+            -57.369999,
+            -4.438018,
+            -6.0
+          ],
+          "box_max": [
+            65.5,
+            4.438018,
+            -0.596
+          ],
+          "color": [
+            0.35,
+            0.12,
+            0.1
+          ]
+        },
+        {
+          "node": "navlight_masthead_light",
+          "box_min": [
+            -49.12,
+            -0.12,
+            28.0
+          ],
+          "box_max": [
+            -48.88,
+            0.12,
+            28.2
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_port_light",
+          "box_min": [
+            -40.919999,
+            10.48,
+            18.3
+          ],
+          "box_max": [
+            -40.679999,
+            10.72,
+            18.5
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_starboard_light",
+          "box_min": [
+            -40.919999,
+            -10.72,
+            18.3
+          ],
+          "box_max": [
+            -40.679999,
+            -10.48,
+            18.5
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_stern_light",
+          "box_min": [
+            -65.319997,
+            -0.12,
+            6.4
+          ],
+          "box_max": [
+            -65.079997,
+            0.12,
+            6.6
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "superstructure",
+          "box_min": [
+            -64.220001,
+            -10.68,
+            4.904953
+          ],
+          "box_max": [
+            62.080002,
+            10.68,
+            28.1
+          ],
+          "color": [
+            0.92,
+            0.92,
+            0.9
+          ]
+        }
+      ],
+      "joints": [
+        {
+          "name": "joint_propeller_main_prop",
+          "node": "propeller_main_prop",
+          "type": "spin",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "origin": [
+            -58.0,
+            0.0,
+            -3.5
+          ],
+          "part": {
+            "node": "propeller_main_prop",
+            "box_min": [
+              -1.26,
+              -2.1,
+              -2.1
+            ],
+            "box_max": [
+              0.63,
+              2.1,
+              2.1
+            ],
+            "color": [
+              0.78,
+              0.62,
+              0.3
+            ]
+          }
+        },
+        {
+          "name": "joint_radar_radar_sband",
+          "node": "radar_mast_radar_sband",
+          "type": "spin",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            -49.0,
+            0.0,
+            24.0
+          ],
+          "part": {
+            "node": "radar_mast_radar_sband",
+            "box_min": [
+              -0.175,
+              -1.8,
+              -0.15
+            ],
+            "box_max": [
+              0.175,
+              1.8,
+              0.28
+            ],
+            "color": [
+              0.85,
+              0.85,
+              0.85
+            ]
+          }
+        },
+        {
+          "name": "joint_radar_radar_xband",
+          "node": "radar_mast_radar_xband",
+          "type": "spin",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            -49.0,
+            0.0,
+            27.0
+          ],
+          "part": {
+            "node": "radar_mast_radar_xband",
+            "box_min": [
+              -0.175,
+              -1.2,
+              -0.15
+            ],
+            "box_max": [
+              0.175,
+              1.2,
+              0.28
+            ],
+            "color": [
+              0.85,
+              0.85,
+              0.85
+            ]
+          }
+        },
+        {
+          "name": "joint_rudder_main_rudder",
+          "node": "rudder_main_rudder",
+          "type": "hinge",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            -61.200001,
+            0.0,
+            -3.0
+          ],
+          "part": {
+            "node": "rudder_main_rudder",
+            "box_min": [
+              -1.898142,
+              -0.241637,
+              -2.304886
+            ],
+            "box_max": [
+              0.813489,
+              0.241637,
+              3.104886
+            ],
+            "color": [
+              0.3,
+              0.1,
+              0.08
+            ]
+          }
+        }
+      ],
+      "ais": {
+        "has_ais": true,
+        "mmsi": 431000002,
+        "name": "GENBU"
+      }
+    },
+    {
+      "robot": "TargetShip02",
+      "model": "ferry_seto",
+      "pos_pdu": "pos",
+      "preview_pose": {
+        "linear": [
+          2400.0,
+          -2200.0,
+          0.0
+        ],
+        "angular": [
+          0.0,
+          0.0,
+          1.5708
+        ]
+      },
+      "extent": {
+        "min": [
+          -32.848049,
+          -7.22,
+          -3.1
+        ],
+        "max": [
+          33.883896,
+          7.22,
+          17.5
+        ]
+      },
+      "parts": [
+        {
+          "node": "deck_fittings",
+          "box_min": [
+            -32.076,
+            -7.018731,
+            1.945386
+          ],
+          "box_max": [
+            33.883896,
+            7.018731,
+            4.43
+          ],
+          "color": [
+            0.45,
+            0.45,
+            0.45
+          ]
+        },
+        {
+          "node": "hull",
+          "box_min": [
+            -32.050999,
+            -7.0,
+            -3.1
+          ],
+          "box_max": [
+            33.808998,
+            7.0,
+            3.1
+          ],
+          "color": [
+            0.55,
+            0.13,
+            0.12
+          ]
+        },
+        {
+          "node": "hull_appendages",
+          "box_min": [
+            -27.547165,
+            -3.292,
+            -3.027409
+          ],
+          "box_max": [
+            31.799999,
+            3.292,
+            -0.175435
+          ],
+          "color": [
+            0.35,
+            0.12,
+            0.1
+          ]
+        },
+        {
+          "node": "navlight_masthead_light",
+          "box_min": [
+            7.88,
+            -0.12,
+            17.3
+          ],
+          "box_max": [
+            8.12,
+            0.12,
+            17.5
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_port_light",
+          "box_min": [
+            9.58,
+            6.98,
+            10.7
+          ],
+          "box_max": [
+            9.82,
+            7.22,
+            10.9
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_starboard_light",
+          "box_min": [
+            9.58,
+            -7.22,
+            10.7
+          ],
+          "box_max": [
+            9.82,
+            -6.98,
+            10.9
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_stern_light",
+          "box_min": [
+            -31.919999,
+            -0.12,
+            3.2
+          ],
+          "box_max": [
+            -31.679999,
+            0.12,
+            3.4
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "superstructure",
+          "box_min": [
+            -32.848049,
+            -7.18,
+            1.68154
+          ],
+          "box_max": [
+            29.58,
+            7.18,
+            17.4
+          ],
+          "color": [
+            0.92,
+            0.92,
+            0.9
+          ]
+        }
+      ],
+      "joints": [
+        {
+          "name": "joint_propeller_port_prop",
+          "node": "propeller_port_prop",
+          "type": "spin",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "origin": [
+            -28.0,
+            3.2,
+            -1.8
+          ],
+          "part": {
+            "node": "propeller_port_prop",
+            "box_min": [
+              -0.69,
+              -1.15,
+              -1.15
+            ],
+            "box_max": [
+              0.345,
+              1.15,
+              1.15
+            ],
+            "color": [
+              0.78,
+              0.62,
+              0.3
+            ]
+          }
+        },
+        {
+          "name": "joint_propeller_stbd_prop",
+          "node": "propeller_stbd_prop",
+          "type": "spin",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "origin": [
+            -28.0,
+            -3.2,
+            -1.8
+          ],
+          "part": {
+            "node": "propeller_stbd_prop",
+            "box_min": [
+              -0.69,
+              -1.15,
+              -1.15
+            ],
+            "box_max": [
+              0.345,
+              1.15,
+              1.15
+            ],
+            "color": [
+              0.78,
+              0.62,
+              0.3
+            ]
+          }
+        },
+        {
+          "name": "joint_radar_radar_xband",
+          "node": "radar_mast_radar_xband",
+          "type": "spin",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            8.0,
+            0.0,
+            16.5
+          ],
+          "part": {
+            "node": "radar_mast_radar_xband",
+            "box_min": [
+              -0.175,
+              -1.2,
+              -0.15
+            ],
+            "box_max": [
+              0.175,
+              1.2,
+              0.28
+            ],
+            "color": [
+              0.85,
+              0.85,
+              0.85
+            ]
+          }
+        },
+        {
+          "name": "joint_rudder_port_rudder",
+          "node": "rudder_port_rudder",
+          "type": "hinge",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            -29.799999,
+            3.2,
+            -1.6
+          ],
+          "part": {
+            "node": "rudder_port_rudder",
+            "box_min": [
+              -1.078772,
+              -0.142466,
+              -1.232883
+            ],
+            "box_max": [
+              0.462331,
+              0.142466,
+              2.032883
+            ],
+            "color": [
+              0.3,
+              0.1,
+              0.08
+            ]
+          }
+        },
+        {
+          "name": "joint_rudder_stbd_rudder",
+          "node": "rudder_stbd_rudder",
+          "type": "hinge",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            -29.799999,
+            -3.2,
+            -1.6
+          ],
+          "part": {
+            "node": "rudder_stbd_rudder",
+            "box_min": [
+              -1.078772,
+              -0.142466,
+              -1.232883
+            ],
+            "box_max": [
+              0.462331,
+              0.142466,
+              2.032883
+            ],
+            "color": [
+              0.3,
+              0.1,
+              0.08
+            ]
+          }
+        }
+      ],
+      "ais": {
+        "has_ais": true,
+        "mmsi": 431000003,
+        "name": "SETO FERRY"
+      }
+    },
+    {
+      "robot": "TargetShipFishing",
+      "model": "fishing_boat",
+      "pos_pdu": "pos",
+      "preview_pose": {
+        "linear": [
+          1200.0,
+          700.0,
+          0.0
+        ],
+        "angular": [
+          0.0,
+          0.0,
+          -2.4
+        ]
+      },
+      "extent": {
+        "min": [
+          -5.8,
+          -1.63,
+          -1.24371
+        ],
+        "max": [
+          6.254979,
+          1.63,
+          4.7
+        ]
+      },
+      "parts": [
+        {
+          "node": "deck_fittings",
+          "box_min": [
+            -5.8,
+            -1.63,
+            0.7
+          ],
+          "box_max": [
+            6.254979,
+            1.63,
+            2.129998
+          ],
+          "color": [
+            0.45,
+            0.45,
+            0.45
+          ]
+        },
+        {
+          "node": "hull",
+          "box_min": [
+            -5.775,
+            -1.6,
+            -1.1
+          ],
+          "box_max": [
+            6.225,
+            1.6,
+            1.55
+          ],
+          "color": [
+            0.55,
+            0.13,
+            0.12
+          ]
+        },
+        {
+          "node": "hull_appendages",
+          "box_min": [
+            -4.6725,
+            -0.1445,
+            -1.1
+          ],
+          "box_max": [
+            -2.685,
+            0.1445,
+            -0.023
+          ],
+          "color": [
+            0.35,
+            0.12,
+            0.1
+          ]
+        },
+        {
+          "node": "navlight_fishing_light_bottom",
+          "box_min": [
+            0.38,
+            -0.12,
+            3.3
+          ],
+          "box_max": [
+            0.62,
+            0.12,
+            3.5
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_fishing_light_top",
+          "box_min": [
+            0.38,
+            -0.12,
+            4.5
+          ],
+          "box_max": [
+            0.62,
+            0.12,
+            4.7
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_masthead_light",
+          "box_min": [
+            0.38,
+            -0.12,
+            3.9
+          ],
+          "box_max": [
+            0.62,
+            0.12,
+            4.1
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_port_light",
+          "box_min": [
+            0.68,
+            0.98,
+            2.4
+          ],
+          "box_max": [
+            0.92,
+            1.22,
+            2.6
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_starboard_light",
+          "box_min": [
+            0.68,
+            -1.22,
+            2.4
+          ],
+          "box_max": [
+            0.92,
+            -0.98,
+            2.6
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "navlight_stern_light",
+          "box_min": [
+            -5.52,
+            -0.12,
+            1.1
+          ],
+          "box_max": [
+            -5.28,
+            0.12,
+            1.3
+          ],
+          "color": [
+            1.0,
+            0.95,
+            0.6
+          ]
+        },
+        {
+          "node": "superstructure",
+          "box_min": [
+            -5.475386,
+            -1.339593,
+            0.734293
+          ],
+          "box_max": [
+            5.558362,
+            1.339593,
+            4.45
+          ],
+          "color": [
+            0.92,
+            0.92,
+            0.9
+          ]
+        }
+      ],
+      "joints": [
+        {
+          "name": "joint_propeller_main_prop",
+          "node": "propeller_main_prop",
+          "type": "spin",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "origin": [
+            -4.8,
+            0.0,
+            -0.85
+          ],
+          "part": {
+            "node": "propeller_main_prop",
+            "box_min": [
+              -0.255,
+              -0.368061,
+              -0.249702
+            ],
+            "box_max": [
+              0.1275,
+              0.368061,
+              0.425
+            ],
+            "color": [
+              0.78,
+              0.62,
+              0.3
+            ]
+          }
+        },
+        {
+          "name": "joint_rudder_main_rudder",
+          "node": "rudder_main_rudder",
+          "type": "hinge",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin": [
+            -5.3,
+            0.0,
+            -0.75
+          ],
+          "part": {
+            "node": "rudder_main_rudder",
+            "box_min": [
+              -0.460796,
+              -0.089497,
+              -0.49371
+            ],
+            "box_max": [
+              0.197484,
+              0.089497,
+              1.29371
+            ],
+            "color": [
+              0.3,
+              0.1,
+              0.08
+            ]
+          }
+        }
+      ],
+      "ais": {
+        "has_ais": false
+      }
+    }
+  ]
+}

@@ -20,20 +20,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$uproject = Join-Path $root 'HakoniwaShip.uproject'
-$editor = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor.exe'
-$map = '/Game/Ship/Levels/ShipSea'
-if (-not (Test-Path $editor)) { throw "見つかりません: $editor" }
-# 実行時の shakoc.dll と共有メモリの設定は船のもの（shipnavi\build\shakoc-dll・shipnavi\runtime の Z:/mmap_ship）。
-# ★ 箱庭の Windows インストーラが HAKO_CORE_DLL_PATH・HAKO_CONFIG_PATH を全体の環境変数に入れている（古い SDK）ので、ここで上書きする
-$shipnavi = (Resolve-Path (Join-Path $root '..')).Path
-$env:HAKO_CORE_DLL_PATH = Join-Path $shipnavi 'build\shakoc-dll\bin'
-$env:HAKO_CONFIG_PATH = Join-Path $shipnavi 'runtime\windows-msvc-x64\cpp_core_config.json'
-foreach ($f in @((Join-Path $env:HAKO_CORE_DLL_PATH 'shakoc.dll'), $env:HAKO_CONFIG_PATH)) { if (-not (Test-Path $f)) { throw "見つかりません: $f" } }
+. (Join-Path $PSScriptRoot 'ship_env.ps1') -EngineRoot $EngineRoot   # shakoc.dll・HAKO_CONFIG_PATH（船のもの）
+$uproject = $ShipUproject
+$editor = $ShipEditor
+$map = $ShipMap
+$logDir = $ShipLogDir
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$logDir = Join-Path $root 'Saved\ShipLogs'
-New-Item -ItemType Directory -Force $logDir | Out-Null
 
 function Invoke-Editor([string[]]$Arguments, [string]$Log, [string]$Pattern) {
     Write-Host "[ship_scene] $editor $($Arguments -join ' ')"

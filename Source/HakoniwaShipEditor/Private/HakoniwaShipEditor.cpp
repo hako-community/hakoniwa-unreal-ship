@@ -3,7 +3,7 @@
 //   自動：UnrealEditor.exe <uproject> -ShipBuildScene [-ShipMap=/Game/...] [-ShipQuit]
 //   手で：エディタのコンソールで  Ship.BuildScene [-ShipMap=/Game/...]
 //
-// Step 1 の場面は骨組みだけ：太陽（平行光）・空の大気・空の光・高さの霧・仮の海面（平らな板。Gerstner 波面は Step 3）・観客の開始位置。
+// 場面：太陽（平行光）・空の大気・空の光・高さの霧・仮の海面（平らな板。Gerstner 波面は Step 3）・観客の開始位置・船団（AShipFleet、Step 2）。
 
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
@@ -24,6 +24,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Modules/ModuleManager.h"
+#include "ShipFleet.h"
 #include "ShipFrame.h"
 #include "ShipViewGameMode.h"
 
@@ -95,7 +96,11 @@ namespace
 			ShipFrame::LocalDirToUnreal(1.0, 1.0, -0.15).Rotation());
 		Start->SetActorLabel(TEXT("ViewStart"));
 
-		UE_LOG(LogShipEditor, Log, TEXT("scene built: sun, sky, fog, sea placeholder, view start"));
+		// 船団（Step 2）：実行時に Config/Fleet/fleet_ue.json の船を並べ、-ShipSync のとき箱庭の PDU で動かす
+		AShipFleet* Fleet = World->SpawnActor<AShipFleet>();
+		Fleet->SetActorLabel(TEXT("ShipFleet"));
+
+		UE_LOG(LogShipEditor, Log, TEXT("scene built: sun, sky, fog, sea placeholder, view start, ship fleet"));
 		return true;
 	}
 

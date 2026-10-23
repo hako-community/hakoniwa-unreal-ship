@@ -90,7 +90,7 @@ public class HakoniwaPdu : ModuleRules
         if (Target.bBuildEditor)
         {
             PrivateDependencyModuleNames.Add("UnrealEd");
-        }
+        }
         // ★ 2026-10-03（A1）: Android では hakoniwa-pdu-registry のヘッダが Unreal の型と衝突する・C の版の判定で
         //   未定義の識別子の警告（エラー扱い）になる。サブモジュールは変えずに、ここで避ける（HakoPduTypesCompat.h）。
         if (Target.Platform == UnrealTargetPlatform.Android)
@@ -108,6 +108,10 @@ public class HakoniwaPdu : ModuleRules
                 "shakoc.lib",
                 Path.Combine(ModuleDirectory, "../ThirdParty/shakoc/lib/Win64/shakoc.lib"));
             PublicAdditionalLibraries.Add(LibPath);
+            // ★ 2026-10-23（ship）: shakoc.dll は遅延読み込みにする。直接の import だとモジュールを読む時点で Windows が PATH から
+            //   名前で探し（箱庭インストーラの PATH の古い %APPDATA%\hakoCore-win\bin を読む）、StartupModule の GetDllHandle は
+            //   その後に別の場所の 2 つ目を読むだけになる。遅延読み込みなら最初の呼び出しで、読み込み済みの（選んだ場所の）DLL に結び付く
+            PublicDelayLoadDLLs.Add("shakoc.dll");
 
             string DllPath = ResolveFile(
                 "HAKO_CORE_DLL_PATH",
