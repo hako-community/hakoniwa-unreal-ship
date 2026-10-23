@@ -2,6 +2,9 @@
 
 #include "ShipFleet.h"
 
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/StaticMesh.h"
+#include "Components/StaticMeshComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Dom/JsonObject.h"
 #include "GameFramework/PlayerController.h"
@@ -264,6 +267,11 @@ void AShipFleet::BeginPlay()
 	FString CameraDump;
 	bCamerasOffline = FParse::Value(Cmd, TEXT("-ShipCameraDump="), CameraDump);
 	FParse::Value(Cmd, TEXT("-ShipHudLog="), HudLogPath);
+	FString QuayArg;
+	if (FParse::Value(Cmd, TEXT("-ShipQuay="), QuayArg, false))
+	{
+		SpawnQuay(QuayArg);
+	}
 	FString ViewArg, ShotViewsArg;
 	FParse::Value(Cmd, TEXT("-ShipView="), ViewArg);
 	FParse::Value(Cmd, TEXT("-ShipShotViews="), ShotViewsArg, false);   // カンマで止めない
@@ -1007,6 +1015,62 @@ void AShipFleet::CheckNavLights()
 		UE_LOG(LogShipFleet, Error, TEXT("HAKONIWA_UNREAL_SHIP_NAVLIGHT_FAILED %d problems: %s"), Problems.Num(),
 			*FString::Join(TArrayView<const FString>(Problems.GetData(), FMath::Min(Problems.Num(), 8)), TEXT("; ")));
 	}
+}
+
+void AShipFleet::SpawnQuay(const FString& Arg)
+{
+	// 岸壁の面は線分 p1→p2（物理の quay と同じ）。陸側へ幅 25 m・水面上 2 m・水面下 10 m のコンクリート、
+	// 水側の面に 12 m おきの防舷材（突出 1 m・幅 1.5 m・高さ 2 m、黒）、天端に係船柱（20 m おき）
+	TArray<FString> P;
+	Arg.ParseIntoArray(P, TEXT(","));
+	if (P.Num() < 6)
+	{
+		UE_LOG(LogShipFleet, Warning, TEXT("-ShipQuay needs x1,y1,x2,y2,water_x,water_y: %s"), *Arg);
+		return;
+	}
+	const FVector2D A(FCString::Atod(*P[0]), FCString::Atod(*P[1])), B(FCString::Atod(*P[2]), FCString::Atod(*P[3])), Wp(FCString::Atod(*P[4]), FCString::Atod(*P[5]));
+	const double Len = (B - A).Size();
+	if (Len < 1.0)
+	{
+		return;
+	}
+	const FVector2D T = (B - A) / Len;
+	FVector2D N(-T.Y, T.X);
+	if (FVector2D::DotProduct(Wp - A, N) > 0.0)
+	{
+		N = -N;   // N は陸側
+	}
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (!Cube || !Base)
+	{
+		return;
+	}
+	const double YawDeg = FMath::RadiansToDegrees(FMath::Atan2(-T.Y, T.X));   // ENU の向き → Unreal の yaw（y が反転）
+	auto Box = [&](const FVector2D& C, double Zc, double Lx, double Wy, double Hz, const FLinearColor& Col)
+	{
+		UStaticMeshComponent* M = NewObject<UStaticMeshComponent>(this);
+		M->SetStaticMesh(Cube);
+		UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Base, M);
+		Mid->SetVectorParameterValue(TEXT("Color"), Col);
+		M->SetMaterial(0, Mid);
+		M->SetupAttachment(GetRootComponent());
+		M->RegisterComponent();
+		M->SetWorldLocationAndRotation(ShipFrame::LocalToUnreal(FVector(C.X, C.Y, Zc)), FRotator(0.0, YawDeg, 0.0));
+		M->SetWorldScale3D(FVector(Lx, Wy, Hz));   // 立方体は 1 m（100 cm）
+		AddInstanceComponent(M);
+	};
+	const double W = 25.0;
+	Box((A + B) * 0.5 + N * (W * 0.5), -4.0, Len, W, 12.0, FLinearColor(0.22f, 0.22f, 0.21f));
+	for (double s = 6.0; s < Len - 3.0; s += 12.0)
+	{
+		Box(A + T * s - N * 0.5, 0.5, 1.5, 1.0, 2.0, FLinearColor(0.02f, 0.02f, 0.02f));
+	}
+	for (double s = 10.0; s < Len - 5.0; s += 20.0)
+	{
+		Box(A + T * s + N * 1.5, 2.4, 0.6, 0.6, 0.8, FLinearColor(0.85f, 0.75f, 0.1f));
+	}
+	UE_LOG(LogShipFleet, Log, TEXT("quay: (%.0f, %.0f) -> (%.0f, %.0f), %.0f m"), A.X, A.Y, B.X, B.Y, Len);
 }
 
 void AShipFleet::UpdateViewData(double T)

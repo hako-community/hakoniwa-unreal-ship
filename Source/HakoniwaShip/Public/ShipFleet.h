@@ -191,6 +191,8 @@ private:
 	void FinishCheck(double PhysicsTime);
 	void UpdateChase(float DeltaSeconds);
 	void UpdateViewData(double T);
+	/** 岸壁（SHP-26 デモ②、-ShipQuay=x1,y1,x2,y2,水側の点 x,y [m ENU]）：コンクリートの岸壁・防舷材・係船柱を置く */
+	void SpawnQuay(const FString& Arg);
 	void WriteHudLog(double T);
 	void TickShotViews();
 	void CheckNavLights();

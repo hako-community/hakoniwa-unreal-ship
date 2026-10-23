@@ -179,6 +179,18 @@ pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 航海情�
   衝突の危険の判定の食い違い 0、25 ms を超えるフレーム 0。
 * `-ShipShotViews=chase,bridge,foc`（`-ShipShot` と一緒に）：終わりに画面を順に切り替えて `<名前>_<画面>.png` を撮る。
 
+## 統合デモの表示（SHP-26）
+
+デモは `hakoniwa-mujoco-ship/demos/run_ship_demo.ps1`（物理・外乱・SUT `ship_sut`・FOC の操作員・このビューアを起動し、終わりに自動採点）。
+
+* **霧（デモ③、D30）**：外乱 PDU の視程（`d_user_custom[0][1]`）が 5 NM 未満なら、高さフォグの濃さを 81.4 / 視程 [m] にし、空の球にも霧を掛ける
+  （エンジンの霧の式：密度 FogDensity/1000 [1/cm]、水平の透過率 exp(−(ln2)²·FogDensity·1e-3·距離 [cm])、視程はコントラスト 2 %）。
+  5 NM 以上は「視界良好」として場面の霞のまま（既定の 10 km で霞ませると船橋カメラの水平線の検証が崩れた）。表示板に `VIS 1.2 NM`。
+* **GNSS 異常・FOC の介入（デモ③）**：ch 50 の `gps` が 0 なら `GNSS FAULT (DR)`（推測航法）を赤で、AL2 の `MRS`、AL1 の `REMOTE` を出す。
+  FOC 画面の下に最後の FOC の指令（`OwnShip/foc_command` ch 51、`{"cmd":"takeover","crs":90.0,"spd":6.0}` など）。
+* **岸壁（デモ②、D31）**：`-ShipQuay=x1,y1,x2,y2,水側の点x,水側の点y`（ENU [m]、物理の `quay` と同じ線分）で、陸側へ幅 25 m・水面上 2 m の
+  コンクリート、12 m おきの防舷材（突出 1 m）、20 m おきの係船柱を置く（エンジン同梱の立方体）。
+
 ## 場面（Step 1）
 
 | 要素 | 中身 |
@@ -194,7 +206,8 @@ pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 航海情�
 2. ~~Step 3：海面を D4 の Gerstner 波で描く（時刻は D19）~~（済）
 3. ~~Step 4：新しい glb（塗装・上部構造物つき）を取り込み、Godot 側と見た目をそろえる~~（済）
 4. ~~Step 5：太陽光のまぶしさ・夜・航海灯~~（済）。残り：遠くの灯の見え方（画素より小さい灯）
-5. SHP-25：~~Step 1 船載カメラの PDU 書き戻し~~（済）、~~Step 2 ブリッジ視界・FOC 画面~~（済）。残り：自動化レベルの形式（K11）
+5. SHP-25：~~Step 1 船載カメラの PDU 書き戻し~~（済）、~~Step 2 ブリッジ視界・FOC 画面~~（済）、~~自動化レベルの形式（K11）~~（済、D29）
+6. SHP-26：~~デモ① 輻輳海域・② 横風下の自動着桟・③ 濃霧＋GNSS 異常の表示~~（済）
 
 ## ライセンス
 
