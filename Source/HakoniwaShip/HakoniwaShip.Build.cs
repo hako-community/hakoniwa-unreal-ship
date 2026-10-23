@@ -13,6 +13,8 @@ public class HakoniwaShip : ModuleRules
 			"Core", "CoreUObject", "Engine",
 		});
 		PrivateDependencyModuleNames.AddRange(new string[] { "Json", "RHI", "RenderCore" });
+		// 海面（Step 3）：波面メッシュ
+		PrivateDependencyModuleNames.Add("ProceduralMeshComponent");
 		// 箱庭のアセット（HakoniwaShmClient。hakoniwa-unreal-drone / rover と同じ）：PduManager は公開ヘッダに出る・ゲームパッドを捨てる入力の前処理
 		PublicDependencyModuleNames.AddRange(new string[] { "HakoniwaPdu", "InputCore" });
 		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

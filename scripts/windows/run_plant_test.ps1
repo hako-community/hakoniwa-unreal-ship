@@ -1,11 +1,12 @@
-﻿# run_plant_test.ps1 — 実物理との結合テスト（SHP-24 Step 2）。hakoniwa-godot-ship の tools/run_plant_test.ps1 と同じ構成で、
+﻿# run_plant_test.ps1 — 実物理との結合テスト（SHP-24 Step 2・3）。hakoniwa-godot-ship の tools/run_plant_test.ps1 と同じ構成で、
 # ビューアを Unreal にしたもの：conductor → ship_plant ＋ 外乱パブリッシャ → Unreal（-game）。
 #
 #   pwsh scripts\windows\run_plant_test.ps1 [-CheckSec 60] [-TimeoutSec 300] [-Screenshot]
 #
 # ship_plant（hakoniwa-mujoco-ship、事前に cmake --build build --config Release）が全船の pos・OwnShip の joint_states を書く。
 # Unreal は -ShipSync -ShipHakoStart で箱庭に登録して開始を要求し、物理時刻で CheckSec 秒受信したら
-#   1) 受信数と、アクタの位置・軸・関節の原点・関節角が PDU どおりか（AShipFleet の検証）→ HAKONIWA_UNREAL_SHIP_SYNC_OK
+#   1) 受信数と、アクタの位置・軸・関節の原点・関節角が PDU どおりか（AShipFleet の検証）、
+#      海面（Step 3）：波浪パラメータ・海面の時刻が物理時刻か・船体の上下動と海面の相関と水線・描いた海面の高さ → HAKONIWA_UNREAL_SHIP_SYNC_OK
 #   2) アクタから読み戻した姿勢（-ShipSamples）を ship_plant の --trace と照合（tools\compare_plant_trace.py）→ HAKONIWA_UNREAL_SHIP_TRACE_OK
 # 両方 OK なら HAKONIWA_UNREAL_SHIP_PLANT_OK を出して 0 で終わる。ログは Saved\ShipLogs\plant_<時刻>\。
 # -Screenshot を付けると終了の少し前に画面を撮る（Saved\ShipLogs\plant_<時刻>\view.png、目視確認用）。
@@ -88,8 +89,8 @@ foreach ($name in 'conductor', 'plant', 'env') {
 }
 Write-Host '----- unreal -----'
 if (Test-Path $ueLog) {
-    Select-String -Path $ueLog -Pattern 'LogShipFleet|HAKONIWA_UNREAL_SHIP|hako_asset_init|Hako Event' |
-        Select-Object -Last 25 | ForEach-Object { Write-Host "  $($_.Line -replace '^\[[^\]]*\]\[[^\]]*\]', '')" }
+    Select-String -Path $ueLog -Pattern 'LogShipFleet|LogShipOcean: wave|HAKONIWA_UNREAL_SHIP|hako_asset_init|Hako Event' |
+        Select-Object -Last 32 | ForEach-Object { Write-Host "  $($_.Line -replace '^\[[^\]]*\]\[[^\]]*\]', '')" }
     $syncOk = [bool](Select-String -Path $ueLog -Pattern 'HAKONIWA_UNREAL_SHIP_SYNC_OK' -Quiet)
 }
 Write-Host '----- trace -----'

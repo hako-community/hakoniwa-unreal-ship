@@ -24,6 +24,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "ShipActor.h"
 #include "ShipFrame.h"
+#include "ShipOcean.h"
+#include "EngineUtils.h"
 #include "UnrealClient.h"
 
 #include "pdu_convertor.hpp"
@@ -34,6 +36,7 @@
 #include "sensor_msgs/pdu_cpptype_conv_JointState.hpp"
 #undef hako_convert_pdu2cpp_array_string_varray
 #undef hako_convert_cpp2pdu_array_string_varray
+#include "hako_msgs/pdu_cpptype_conv_Disturbance.hpp"
 
 DEFINE_LOG_CATEGORY_STATIC(LogShipFleet, Log, All);
 
@@ -61,6 +64,31 @@ namespace
 	FVector DirToLocal(const FVector& U) { return FVector(U.X, -U.Y, U.Z); }
 
 	double WrapPi(double A) { return FMath::Atan2(FMath::Sin(A), FMath::Cos(A)); }
+
+	/** fleet_ue.json の波浪（wave.preview / plant_check.wave）→ WaveParams。潮位は物理プラグインと同じく 0 */
+	bool JsonWave(const TSharedPtr<FJsonObject>& O, ShipWave::FParams& W)
+	{
+		if (!O)
+		{
+			return false;
+		}
+		W = ShipWave::FParams();
+		W.hs_m = O->GetNumberField(TEXT("hs_m"));
+		W.tp_s = O->GetNumberField(TEXT("tp_s"));
+		W.wave_dir_rad = O->GetNumberField(TEXT("wave_dir_rad"));
+		W.gamma = O->GetNumberField(TEXT("gamma"));
+		W.seed = static_cast<uint32_t>(O->GetNumberField(TEXT("seed")));
+		W.water_depth_m = O->GetNumberField(TEXT("water_depth_m"));
+		W.tide_level_m = 0.0;
+		return true;
+	}
+}
+
+double AShipFleet::FHeaveAcc::Corr() const
+{
+	const double Vx = N * Sxx - Sx * Sx;
+	const double Vy = N * Syy - Sy * Sy;
+	return (N > 1 && Vx > 0.0 && Vy > 0.0) ? (N * Sxy - Sx * Sy) / FMath::Sqrt(Vx * Vy) : 0.0;
 }
 
 AShipFleet::AShipFleet()
@@ -119,6 +147,32 @@ bool AShipFleet::LoadFleet()
 		S->TryGetStringField(TEXT("joint_states_pdu"), Sh.JointPdu);
 		Sync.Add(Sh);
 	}
+	// 海面（Step 3）
+	const TSharedPtr<FJsonObject> Wave = Root->GetObjectField(TEXT("wave"));
+	const TSharedPtr<FJsonObject> Dist = Wave->GetObjectField(TEXT("disturbance"));
+	DistRobot = Dist->GetStringField(TEXT("robot"));
+	DistPdu = Dist->GetStringField(TEXT("pdu"));
+	WaveComponents = Wave->GetIntegerField(TEXT("num_components"));
+	WaveActiveHs = Wave->GetNumberField(TEXT("active_hs_m"));
+	bHasPreviewWave = JsonWave(Wave->GetObjectField(TEXT("preview")), PreviewWave);
+	const TSharedPtr<FJsonObject> Check = Root->GetObjectField(TEXT("plant_check"));
+	SettleSec = Check->GetNumberField(TEXT("settle_s"));
+	HeaveCorrMin = Check->GetNumberField(TEXT("heave_corr_min"));
+	WaterlineRmsMax = Check->GetNumberField(TEXT("waterline_rms_max_m"));
+	bHasExpectedWave = JsonWave(Check->GetObjectField(TEXT("wave")), ExpectedWave);
+	const double Tp = ExpectedWave.tp_s;
+	HeaveLags = { 0.0, 0.5, 1.0, 1.5, 0.5 * Tp, -0.5 * Tp };
+	const TSharedPtr<FJsonObject> CheckShips = Check->GetObjectField(TEXT("ships"));
+	for (FShipSync& S : Sync)
+	{
+		const TSharedPtr<FJsonObject>* C = nullptr;
+		if (CheckShips->TryGetObjectField(S.Actor->Robot, C))
+		{
+			S.LppM = (*C)->GetNumberField(TEXT("lpp_m"));
+			S.BeamM = (*C)->GetNumberField(TEXT("beam_m"));
+			S.Heave.SetNum(HeaveLags.Num());
+		}
+	}
 	UE_LOG(LogShipFleet, Log, TEXT("fleet %s: %d ships, %d PDUs, clock %s/%s, asset %s"), *Path, Ships.Num(), PduTable.Num(), *ClockRobot, *ClockPdu, *AssetName);
 	return Ships.Num() > 0;
 }
@@ -141,6 +195,7 @@ void AShipFleet::BeginPlay()
 	}
 	FParse::Value(Cmd, TEXT("-ShipSamples="), SamplesPath);
 	FParse::Value(Cmd, TEXT("-ShipShot="), ShotPath);
+	FParse::Value(Cmd, TEXT("-ShipFrameLog="), FrameLogPath);
 	bChase = FParse::Param(Cmd, TEXT("ShipChase")) || !ShotPath.IsEmpty();
 	if (!LoadFleet())
 	{
@@ -153,6 +208,25 @@ void AShipFleet::BeginPlay()
 	}
 	UE_LOG(LogShipFleet, Log, TEXT("sync=%d hako_start=%d check=%.1f s samples=%s HAKO_CONFIG_PATH=%s"),
 		bSync, bHakoStart, CheckSec, *SamplesPath, *FPlatformMisc::GetEnvironmentVariable(TEXT("HAKO_CONFIG_PATH")));
+	// 海面：箱庭につないだときは Disturbance が届くまで静水（Godot と同じ）、つながないときは wave.preview。海面は船団の後に Tick する
+	for (TActorIterator<AShipOcean> It(GetWorld()); It; ++It)
+	{
+		Ocean = *It;
+		break;
+	}
+	if (Ocean)
+	{
+		Ocean->Configure(WaveComponents, WaveActiveHs);
+		Ocean->AddTickPrerequisiteActor(this);
+		if (!bSync && bHasPreviewWave)
+		{
+			Ocean->SetWaveParams(PreviewWave);
+		}
+	}
+	else
+	{
+		UE_LOG(LogShipFleet, Warning, TEXT("no AShipOcean in the map (run scripts\\windows\\ship_scene.ps1 -Build)"));
+	}
 	if (bSync && !FindPduManager())
 	{
 		// rover の ARoverAvatar と同じく -ShipSync のときだけ箱庭のアセットを置く。BeginPlay で登録し、OnHakoInitialize で PDU を宣言する
@@ -244,31 +318,10 @@ bool AShipFleet::ReadPose(UPduManager* Pdu, FShipSync& S)
 	{
 		return false;
 	}
-	const FVector Lin(T.linear.x, T.linear.y, T.linear.z);
-	const FVector Ang(T.angular.x, T.angular.y, T.angular.z);
-	S.Actor->ApplyPose(Lin, Ang);
-	S.LastLinear = Lin;
-	S.LastAngular = Ang;
+	S.bNewPose = true;
+	S.NewLinear = FVector(T.linear.x, T.linear.y, T.linear.z);
+	S.NewAngular = FVector(T.angular.x, T.angular.y, T.angular.z);
 	++S.PosFrames;
-
-	// 検証 1：Unreal のアクタの位置と軸（エンジンが四元数から求めた前・右・上の向き）を、PDU から右手系で直接求めた値と比べる。
-	//   前 = R·x、右（Unreal の +Y）= R·(−y)、上 = R·z。四元数への変換（ShipFrame::RotationToUnreal）を通らない独立の計算
-	const FMatrix R = ShipFrame::PduAngularToRotation(Ang.X, Ang.Y, Ang.Z);
-	const double PosErr = (ShipFrame::UnrealToLocal(S.Actor->GetActorLocation()) - Lin).Size();
-	const double AxisErr = FMath::Max3(
-		(DirToLocal(S.Actor->GetActorForwardVector()) - Rotate(R, FVector(1, 0, 0))).Size(),
-		(DirToLocal(S.Actor->GetActorRightVector()) - Rotate(R, FVector(0, -1, 0))).Size(),
-		(DirToLocal(S.Actor->GetActorUpVector()) - Rotate(R, FVector(0, 0, 1))).Size());
-	// 検証 2：関節の原点（船体の座標の定数）の世界の位置 = p + R·origin
-	double PivotErr = 0.0;
-	for (const FShipJoint& J : S.Actor->Joints)
-	{
-		const FVector Origin = ShipFrame::UnrealToLocal(J.Pivot->GetRelativeLocation());
-		const FVector Want = Lin + Rotate(R, Origin);
-		PivotErr = FMath::Max(PivotErr, (ShipFrame::UnrealToLocal(J.Pivot->GetComponentLocation()) - Want).Size());
-	}
-	S.MaxPosErr = FMath::Max3(S.MaxPosErr, PosErr, PivotErr);
-	S.MaxAngErr = FMath::Max(S.MaxAngErr, AxisErr);   // 単位ベクトルの差 ≈ 角度 [rad]
 	return true;
 }
 
@@ -284,31 +337,281 @@ bool AShipFleet::ReadJoints(UPduManager* Pdu, FShipSync& S, double& OutStamp)
 	{
 		return false;
 	}
-	TArray<FString> Names;
-	TArray<double> Pos;
+	S.JointNames.Reset();
+	S.NewJoints.Reset();
 	for (size_t i = 0; i < J.name.size(); ++i)
 	{
-		Names.Add(UTF8_TO_TCHAR(J.name[i].c_str()));
-		Pos.Add(i < J.position.size() ? J.position[i] : 0.0);
+		S.JointNames.Add(UTF8_TO_TCHAR(J.name[i].c_str()));
+		S.NewJoints.Add(i < J.position.size() ? J.position[i] : 0.0);
 	}
-	S.Actor->ApplyJoints(Names, Pos);
+	S.bNewJoints = true;
 	++S.JointFrames;
 	OutStamp = J.header.stamp.sec + J.header.stamp.nanosec * 1.0e-9;
-	// 検証 3：関節の部品の角度を読み戻す（軸まわりの回転角。2π の折り返しは除く）
-	for (int32 i = 0; i < Names.Num(); ++i)
-	{
-		double Q = 0.0;
-		if (S.Actor->ReadBackJoint(Names[i], Q))
-		{
-			S.MaxJointErr = FMath::Max(S.MaxJointErr, FMath::Abs(WrapPi(Q - Pos[i])));
-		}
-	}
 	return true;
 }
 
-void AShipFleet::WriteSamples(double PhysicsTime)
+void AShipFleet::PushSamples(FShipSync& S, double T)
 {
-	// アクタの変換から読み戻した値（ShipFrame の逆変換）。物理の trace と同じ列
+	// 受信した値を物理時刻 T の標本として履歴に積む（同じ時刻なら置き換える）。古いものは捨てる
+	if (S.bNewPose)
+	{
+		S.bNewPose = false;
+		if (S.Poses.Num() > 0 && S.Poses.Last().T >= T)
+		{
+			S.Poses.Pop();
+		}
+		S.Poses.Add({ T, S.NewLinear, S.NewAngular, {} });
+	}
+	if (S.bNewJoints)
+	{
+		S.bNewJoints = false;
+		if (S.JointHist.Num() > 0 && S.JointHist.Last().T >= T)
+		{
+			S.JointHist.Pop();
+		}
+		S.JointHist.Add({ T, FVector::ZeroVector, FVector::ZeroVector, S.NewJoints });
+	}
+	constexpr int32 Keep = 32;
+	if (S.Poses.Num() > Keep) { S.Poses.RemoveAt(0, S.Poses.Num() - Keep); }
+	if (S.JointHist.Num() > Keep) { S.JointHist.RemoveAt(0, S.JointHist.Num() - Keep); }
+}
+
+int32 AShipFleet::Bracket(const TArray<FShipSample>& H, double T, double& OutAlpha)
+{
+	// H[i].T <= T <= H[i+1].T の i（範囲外は端に止める：OutAlpha = 0 で H[i] そのもの）
+	OutAlpha = 0.0;
+	if (H.Num() == 0) { return INDEX_NONE; }
+	if (T <= H[0].T) { return 0; }
+	for (int32 i = H.Num() - 2; i >= 0; --i)
+	{
+		if (H[i].T <= T)
+		{
+			const double Span = H[i + 1].T - H[i].T;
+			OutAlpha = Span > 0.0 ? FMath::Clamp((T - H[i].T) / Span, 0.0, 1.0) : 1.0;
+			return i;
+		}
+	}
+	return H.Num() - 1;
+}
+
+void AShipFleet::ApplyAt(FShipSync& S, double T)
+{
+	// 表示時刻 T の姿勢：前後の受信値の線形補間（角度は差を ±π に折り返して補間）。物理は 20 ms ごとなので補間の誤差は見えない
+	double Alpha = 0.0;
+	const int32 i = Bracket(S.Poses, T, Alpha);
+	if (i != INDEX_NONE)
+	{
+		const FShipSample& A = S.Poses[i];
+		const FShipSample& B = S.Poses[FMath::Min(i + 1, S.Poses.Num() - 1)];
+		const FVector Lin = FMath::Lerp(A.Lin, B.Lin, Alpha);
+		const FVector Ang(A.Ang.X + Alpha * WrapPi(B.Ang.X - A.Ang.X), A.Ang.Y + Alpha * WrapPi(B.Ang.Y - A.Ang.Y), A.Ang.Z + Alpha * WrapPi(B.Ang.Z - A.Ang.Z));
+		S.Actor->ApplyPose(Lin, Ang);
+		S.LastLinear = Lin;
+		S.LastAngular = Ang;
+
+		// 検証 1：Unreal のアクタの位置と軸（エンジンが四元数から求めた前・右・上の向き）を、表示する値から右手系で直接求めた値と比べる。
+		//   前 = R·x、右（Unreal の +Y）= R·(−y)、上 = R·z。四元数への変換（ShipFrame::RotationToUnreal）を通らない独立の計算
+		const FMatrix R = ShipFrame::PduAngularToRotation(Ang.X, Ang.Y, Ang.Z);
+		const double PosErr = (ShipFrame::UnrealToLocal(S.Actor->GetActorLocation()) - Lin).Size();
+		const double AxisErr = FMath::Max3(
+			(DirToLocal(S.Actor->GetActorForwardVector()) - Rotate(R, FVector(1, 0, 0))).Size(),
+			(DirToLocal(S.Actor->GetActorRightVector()) - Rotate(R, FVector(0, -1, 0))).Size(),
+			(DirToLocal(S.Actor->GetActorUpVector()) - Rotate(R, FVector(0, 0, 1))).Size());
+		// 検証 2：関節の原点（船体の座標の定数）の世界の位置 = p + R·origin
+		double PivotErr = 0.0;
+		for (const FShipJoint& J : S.Actor->Joints)
+		{
+			const FVector Origin = ShipFrame::UnrealToLocal(J.Pivot->GetRelativeLocation());
+			const FVector Want = Lin + Rotate(R, Origin);
+			PivotErr = FMath::Max(PivotErr, (ShipFrame::UnrealToLocal(J.Pivot->GetComponentLocation()) - Want).Size());
+		}
+		S.MaxPosErr = FMath::Max3(S.MaxPosErr, PosErr, PivotErr);
+		S.MaxAngErr = FMath::Max(S.MaxAngErr, AxisErr);   // 単位ベクトルの差 ≈ 角度 [rad]
+	}
+	const int32 j = Bracket(S.JointHist, T, Alpha);
+	if (j != INDEX_NONE)
+	{
+		const TArray<double>& A = S.JointHist[j].Joints;
+		const TArray<double>& B = S.JointHist[FMath::Min(j + 1, S.JointHist.Num() - 1)].Joints;
+		TArray<double> Q;
+		for (int32 k = 0; k < A.Num(); ++k)
+		{
+			Q.Add(k < B.Num() ? A[k] + Alpha * WrapPi(B[k] - A[k]) : A[k]);
+		}
+		S.Actor->ApplyJoints(S.JointNames, Q);
+		// 検証 3：関節の部品の角度を読み戻す（軸まわりの回転角。2π の折り返しは除く）
+		for (int32 k = 0; k < S.JointNames.Num() && k < Q.Num(); ++k)
+		{
+			double Back = 0.0;
+			if (S.Actor->ReadBackJoint(S.JointNames[k], Back))
+			{
+				S.MaxJointErr = FMath::Max(S.MaxJointErr, FMath::Abs(WrapPi(Back - Q[k])));
+			}
+		}
+	}
+}
+
+void AShipFleet::UpdateDisplayClock(double Dt)
+{
+	// 表示時刻：毎フレーム実時間で進め、最新の物理時刻 − DisplayDelay へゆっくり寄せる（±25 % の速さの調整）。
+	// 物理は 50 Hz で、箱庭の許容遅延の範囲で間隔が揺れる。受信した時刻をそのまま使うと、描画（130〜200 FPS）が 2〜4 フレームごとに
+	// 飛ぶのでカクつく。最新の受信より先は描かない（届かないときは止まる）。0.5 s 以上ずれたら合わせ直す
+	const double Target = LastPhysicsTime - DisplayDelay;
+	const double Prev = DisplayTime;
+	if (DisplayTime < 0.0 || FMath::Abs(Target - DisplayTime) > 0.5)
+	{
+		if (DisplayTime >= 0.0) { ++ClockSnaps; }
+		DisplayTime = Target;
+	}
+	else
+	{
+		DisplayTime += Dt * (1.0 + FMath::Clamp((Target - DisplayTime) * 2.0, -0.25, 0.25));
+	}
+	DisplayTime = FMath::Min(DisplayTime, LastPhysicsTime);
+	++DisplayFrames;
+	DisplayHolds += DisplayTime <= Prev ? 1 : 0;
+	DisplayLagMax = FMath::Max(DisplayLagMax, LastPhysicsTime - DisplayTime);
+}
+
+void AShipFleet::ReadDisturbance(UPduManager* Pdu)
+{
+	// Godot の disturbance_sync.gd と同じ取り出し（ShipWave::ParseDisturbance）。同じ値なら海面は何もしない
+	if (!Ocean || DistPdu.IsEmpty() || !Pdu->ReadPduRawData(DistRobot, DistPdu, Buf) || Buf.Num() == 0)
+	{
+		return;
+	}
+	HakoCpp_Disturbance D {};
+	hako::pdu::PduConvertor<HakoCpp_Disturbance, hako::pdu::msgs::hako_msgs::Disturbance> Conv;
+	if (!Conv.pdu2cpp(reinterpret_cast<char*>(Buf.GetData()), D))
+	{
+		return;
+	}
+	TArray<TArray<double>> Custom;
+	for (const auto& C : D.d_user_custom)
+	{
+		Custom.Emplace(C.data.data(), static_cast<int32>(C.data.size()));
+	}
+	ShipWave::FParams W;
+	if (ShipWave::ParseDisturbance(Custom, W))
+	{
+		++DistFrames;
+		Ocean->SetWaveParams(W);
+	}
+}
+
+void AShipFleet::SampleHeave()
+{
+	// Godot の plant_coupling_check.gd の _sample_heave と同じ：船体の水線面（長さ方向 10 点 × 幅方向 3 点）の η の平均と、
+	// 船の上下位置（アクタから読み戻した z）を、海面の時刻から lag だけ戻した η と比べる
+	constexpr int32 Stations = 10;
+	const double TSea = Ocean->GetTime();
+	for (FShipSync& S : Sync)
+	{
+		if (S.Heave.Num() == 0 || S.PosFrames == 0)
+		{
+			continue;
+		}
+		const FVector P = ShipFrame::UnrealToLocal(S.Actor->GetActorLocation());
+		const double Yaw = S.LastAngular.Z;
+		const FVector2D Fwd(FMath::Cos(Yaw), FMath::Sin(Yaw));
+		const FVector2D Left(-FMath::Sin(Yaw), FMath::Cos(Yaw));
+		for (int32 l = 0; l < HeaveLags.Num(); ++l)
+		{
+			const double T = TSea - HeaveLags[l];
+			double Sum = 0.0;
+			for (int32 s = 0; s < Stations; ++s)
+			{
+				const double Xi = ((s + 0.5) / Stations - 0.5) * S.LppM;
+				for (const double Yi : { -0.5 * S.BeamM, 0.0, 0.5 * S.BeamM })
+				{
+					const FVector2D Q = FVector2D(P.X, P.Y) + Fwd * Xi + Left * Yi;
+					Sum += Ocean->ElevationAt(Q.X, Q.Y, T);
+				}
+			}
+			const double Eta = Sum / (Stations * 3);
+			FHeaveAcc& A = S.Heave[l];
+			A.Sx += P.Z; A.Sy += Eta; A.Sxx += P.Z * P.Z; A.Syy += Eta * Eta; A.Sxy += P.Z * Eta;
+			A.Sd2 += (P.Z - Eta) * (P.Z - Eta);
+			++A.N;
+		}
+	}
+}
+
+void AShipFleet::CheckSea(TArray<FString>& Problems)
+{
+	if (!Ocean)
+	{
+		Problems.Add(TEXT("no ocean"));
+		return;
+	}
+	// 1. 波浪パラメータ（外乱パブリッシャが書いた値 = Godot の expected.json と同じ）
+	const ShipWave::FParams& W = Ocean->GetWaveParams();
+	UE_LOG(LogShipFleet, Log, TEXT("SHIP_SEA wave: disturbance frames %lld, active %d, %d components, Hs %.3f Tp %.3f dir %.3f gamma %.2f seed %u depth %.1f"),
+		DistFrames, Ocean->IsWaveActive(), Ocean->ComponentCount(), W.hs_m, W.tp_s, W.wave_dir_rad, W.gamma, W.seed, W.water_depth_m);
+	if (DistFrames == 0) { Problems.Add(TEXT("no maritime_disturbance")); }
+	if (!Ocean->IsWaveActive() || Ocean->ComponentCount() != WaveComponents)
+	{
+		Problems.Add(FString::Printf(TEXT("ocean wave not active (%d components)"), Ocean->ComponentCount()));
+	}
+	if (bHasExpectedWave)
+	{
+		ShipWave::FParams E = ExpectedWave;
+		E.num_components = W.num_components;
+		if (!ShipWave::SameParams(E, W)) { Problems.Add(TEXT("wave parameters differ from plant_check.wave")); }
+	}
+	// 2. 海面の時刻 = 物理時刻（D19）
+	UE_LOG(LogShipFleet, Log, TEXT("SHIP_SEA time: sea surface drawn at the ships' display time in %lld / %lld frames"), ClockFromPhysics, ClockFrames);
+	if (ClockFrames == 0 || ClockFromPhysics < 0.99 * ClockFrames)
+	{
+		Problems.Add(FString::Printf(TEXT("sea surface not drawn at the ships' display time (%lld / %lld frames)"), ClockFromPhysics, ClockFrames));
+	}
+	// 3. 船体の上下動と海面（Godot と同じ閾値）
+	for (const FShipSync& S : Sync)
+	{
+		if (S.Heave.Num() == 0)
+		{
+			continue;
+		}
+		FString Line = FString::Printf(TEXT("SHIP_SEA heave %-18s corr(z, eta(t-tau)):"), *S.Actor->Robot);
+		double Best = -1.0, BestLag = 0.0;
+		for (int32 l = 0; l < HeaveLags.Num(); ++l)
+		{
+			const double R = S.Heave[l].Corr();
+			Line += FString::Printf(TEXT(" %+.1fs=%.3f"), HeaveLags[l], R);
+			if (l < 4 && R > Best) { Best = R; BestLag = HeaveLags[l]; }
+		}
+		const FHeaveAcc& A0 = S.Heave[0];
+		const double Rms = FMath::Sqrt(A0.Sd2 / FMath::Max<double>(1.0, A0.N));
+		UE_LOG(LogShipFleet, Log, TEXT("%s | best %.1f s, waterline rms %.3f m, n=%lld"), *Line, BestLag, Rms, A0.N);
+		if (A0.N == 0) { Problems.Add(FString::Printf(TEXT("%s: no heave samples"), *S.Actor->Robot)); continue; }
+		if (Best < HeaveCorrMin) { Problems.Add(FString::Printf(TEXT("%s: heave does not follow the sea surface (best corr %.3f)"), *S.Actor->Robot, Best)); }
+		if (S.Heave[4].Corr() >= 0.3 || S.Heave[5].Corr() >= 0.3) { Problems.Add(FString::Printf(TEXT("%s: heave correlates with the time-shifted sea surface"), *S.Actor->Robot)); }
+		if (Rms > WaterlineRmsMax) { Problems.Add(FString::Printf(TEXT("%s: waterline rms %.3f m"), *S.Actor->Robot, Rms)); }
+	}
+	// 4. 描いた海面の高さ（AShipOcean の真上からの検証）
+	UE_LOG(LogShipFleet, Log, TEXT("SHIP_SEA surface: %d checks, %lld points, misses %lld, max err %.2e m, max |eta| %.2f m"),
+		Ocean->SurfaceChecks, Ocean->SurfacePoints, Ocean->SurfaceMisses, Ocean->SurfaceMaxErr, Ocean->SurfaceMaxEta);
+	if (Ocean->SurfaceChecks < 3) { Problems.Add(FString::Printf(TEXT("too few surface checks: %d"), Ocean->SurfaceChecks)); }
+	if (Ocean->SurfaceMisses > 0) { Problems.Add(FString::Printf(TEXT("surface not drawn at %lld points"), Ocean->SurfaceMisses)); }
+	if (Ocean->SurfaceMaxErr > 5.0e-3) { Problems.Add(FString::Printf(TEXT("drawn surface differs from the physics wave: %.2e m"), Ocean->SurfaceMaxErr)); }
+	if (Ocean->SurfaceMaxEta < 0.1) { Problems.Add(TEXT("surface check saw no waves")); }
+}
+
+bool AShipFleet::WriteSamples(double PhysicsTime)
+{
+	// アクタの変換から読み戻した値（ShipFrame の逆変換）。物理の trace と同じ列。
+	// 照合（tools/compare_plant_trace.py）は trace を同じ式で補間するので、補間の両端が物理の隣り合うステップのときだけ書く
+	// （物理が詰まって何ステップか一度に届くと、PDU は最新しか読めず、間を飛ばして補間する。それは正しい表示だが trace とは比べられない）
+	for (const FShipSync& S : Sync)
+	{
+		double Alpha = 0.0;
+		const int32 i = Bracket(S.Poses, PhysicsTime, Alpha);
+		if (S.PosFrames > 0 && (i == INDEX_NONE || i + 1 >= S.Poses.Num() || S.Poses[i + 1].T - S.Poses[i].T > 0.0201))
+		{
+			++SamplesSkipped;
+			return false;
+		}
+	}
 	for (const FShipSync& S : Sync)
 	{
 		if (S.PosFrames == 0)
@@ -319,6 +622,7 @@ void AShipFleet::WriteSamples(double PhysicsTime)
 		S.Actor->ReadBackPose(L, A);
 		SampleLines.Add(FString::Printf(TEXT("%.6f,%s,%.6f,%.6f,%.6f,%.9f,%.9f,%.9f"), PhysicsTime, *S.Actor->Robot, L.X, L.Y, L.Z, A.X, A.Y, A.Z));
 	}
+	return true;
 }
 
 void AShipFleet::LogStatus(double PhysicsTime)
@@ -381,6 +685,12 @@ void AShipFleet::FinishCheck(double PhysicsTime)
 	if (PosErr > 1.0e-3) { Problems.Add(FString::Printf(TEXT("position/pivot error %.6f m > 1e-3"), PosErr)); }
 	if (AngErr > 1.0e-4) { Problems.Add(FString::Printf(TEXT("axis error %.3e > 1e-4"), AngErr)); }
 	if (JointErr > 1.0e-4) { Problems.Add(FString::Printf(TEXT("joint error %.3e rad > 1e-4"), JointErr)); }
+	CheckSea(Problems);
+	// 表示時刻のなめらかさ：止まったフレーム（新しい物理が届かない間）の割合
+	const double HoldRatio = DisplayFrames > 0 ? static_cast<double>(DisplayHolds) / DisplayFrames : 1.0;
+	UE_LOG(LogShipFleet, Log, TEXT("SHIP_VIEW display clock: %lld frames, held %lld (%.2f %%), resyncs %lld, delay %.3f s, max lag behind physics %.3f s"),
+		DisplayFrames, DisplayHolds, 100.0 * HoldRatio, ClockSnaps, DisplayDelay, DisplayLagMax);
+	if (HoldRatio > 0.05) { Problems.Add(FString::Printf(TEXT("display clock held in %.1f %% of frames (not smooth)"), 100.0 * HoldRatio)); }
 	if (!SamplesPath.IsEmpty())
 	{
 		const FString Csv = TEXT("t,robot,x,y,z,roll,ang_y,yaw\n") + FString::Join(SampleLines, TEXT("\n")) + TEXT("\n");
@@ -389,13 +699,17 @@ void AShipFleet::FinishCheck(double PhysicsTime)
 			Problems.Add(FString::Printf(TEXT("cannot write %s"), *SamplesPath));
 		}
 	}
+	if (!FrameLogPath.IsEmpty())
+	{
+		FFileHelper::SaveStringToFile(TEXT("wall,dt,physics,new,display\n") + FString::Join(FrameLines, TEXT("\n")) + TEXT("\n"), *FrameLogPath);
+	}
 	TArray<FString> Counts;
 	for (const FShipSync& S : Sync)
 	{
 		Counts.Add(FString::Printf(TEXT("%s=%lld"), *S.Actor->Robot, S.PosFrames));
 	}
-	const FString Summary = FString::Printf(TEXT("physics %.2f..%.2f s (stalls %lld) frames %s max err pos %.2e m axis %.2e joint %.2e rad samples %d"),
-		FirstPhysicsTime, PhysicsTime, ClockStalls, *FString::Join(Counts, TEXT(" ")), PosErr, AngErr, JointErr, SampleLines.Num());
+	const FString Summary = FString::Printf(TEXT("display %.2f..%.2f s (physics stalls %lld) frames %s max err pos %.2e m axis %.2e joint %.2e rad samples %d (skipped frames %lld)"),
+		FirstDisplayTime, PhysicsTime, ClockStalls, *FString::Join(Counts, TEXT(" ")), PosErr, AngErr, JointErr, SampleLines.Num(), SamplesSkipped);
 	if (Problems.Num() == 0)
 	{
 		UE_LOG(LogShipFleet, Display, TEXT("HAKONIWA_UNREAL_SHIP_SYNC_OK %s"), *Summary);
@@ -411,7 +725,7 @@ void AShipFleet::FinishCheck(double PhysicsTime)
 		return;
 	}
 	// 撮影は次の描画で行われるので、数フレーム待ってから終わる
-	FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(ShotPath), false, false);
+	FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(ShotPath), true, false);   // 画面の警告（赤い文字）も写す
 	UE_LOG(LogShipFleet, Log, TEXT("shot -> %s"), *ShotPath);
 	ExitCountdown = 30;
 }
@@ -469,24 +783,30 @@ void AShipFleet::Tick(float DeltaSeconds)
 		}
 	}
 	// ★ PduManager::ReadPduRawData は受信した PDU を 1 回だけ返す（CommunicationBuffer::GetBuffer が取り出して消す）。
-	//   新しい値が無いフレームは読めないので、アクタは前の姿勢のまま。fps はここで読めたかどうかに関係なく数える
+	//   新しい値が無いフレームは読めない。受信した値は物理時刻つきの履歴に積み、描くのは表示時刻（UpdateDisplayClock）の補間値
+	//   ship_plant は 1 ステップで全船の pos を書いてから、時刻（stamp）つきの joint_states を書く。pos には時刻が無いので、
+	//   先に全船の pos を読み、そのあと時刻を読む。新しい時刻が届くまでに読めた pos はその時刻のもの（届かなければ次の時刻まで待たせる）
 	double Stamp = -1.0;
 	for (FShipSync& S : Sync)
 	{
 		ReadPose(Pdu, S);
+	}
+	for (FShipSync& S : Sync)
+	{
 		double St = -1.0;
 		if (ReadJoints(Pdu, S, St) && S.Actor->Robot == ClockRobot && S.JointPdu == ClockPdu)
 		{
 			Stamp = St;
 		}
 	}
+	ReadDisturbance(Pdu);
 	if (Stamp < 0.0)
 	{
 		// 新しい joint_states が無いフレーム（描画が物理の 50 Hz より速いと大半）
 	}
 	else if (Stamp <= LastPhysicsTime)
 	{
-		++ClockStalls;   // 物理時刻が進んでいない joint_states（PLANT が同じ時刻で書き直した）。標本は書かない
+		++ClockStalls;   // 物理時刻が進んでいない joint_states（PLANT が同じ時刻で書き直した）
 	}
 	else
 	{
@@ -496,15 +816,58 @@ void AShipFleet::Tick(float DeltaSeconds)
 			FirstPhysicsTime = Stamp;
 			UE_LOG(LogShipFleet, Log, TEXT("first physics stamp %.3f s"), Stamp);
 		}
-		if (!SamplesPath.IsEmpty() && Stamp - LastSampleTime >= SampleInterval - 1e-9)
+	}
+	if (LastPhysicsTime < 0.0)
+	{
+		return;
+	}
+	if (Stamp >= 0.0 && Stamp == LastPhysicsTime)
+	{
+		for (FShipSync& S : Sync)
 		{
-			LastSampleTime = Stamp;
-			WriteSamples(Stamp);
+			PushSamples(S, LastPhysicsTime);
 		}
 	}
-	LogStatus(LastPhysicsTime);
-	if (CheckSec > 0.0 && FirstPhysicsTime >= 0.0 && LastPhysicsTime - FirstPhysicsTime >= CheckSec)
+	UpdateDisplayClock(DeltaSeconds);
+	if (FirstDisplayTime < 0.0)
 	{
-		FinishCheck(LastPhysicsTime);
+		FirstDisplayTime = DisplayTime;
+	}
+	for (FShipSync& S : Sync)
+	{
+		ApplyAt(S, DisplayTime);
+	}
+	// 標本は始まって 1 s 後から（開始直後は物理が遅れを取り戻すため時刻が数ステップずつ飛び、最初の pos の時刻が決められない）
+	if (!SamplesPath.IsEmpty() && DisplayTime >= FirstDisplayTime + 1.0 && DisplayTime - LastSampleTime >= SampleInterval - 1e-9)
+	{
+		if (WriteSamples(DisplayTime))
+		{
+			LastSampleTime = DisplayTime;
+		}
+	}
+	if (Ocean)
+	{
+		// 海面は船と同じ表示時刻で描く（D19：受信した姿勢と同じ物理時刻の海面。補間した姿勢には同じ時刻の海面）
+		Ocean->SetPhysicsTime(DisplayTime);
+		++ClockFrames;
+		ClockFromPhysics += Ocean->GetTime() == DisplayTime ? 1 : 0;
+		if (CheckSec > 0.0 && DisplayTime > SettleSec)
+		{
+			SampleHeave();
+			if (DisplayTime - LastSurfaceRequest >= 10.0)
+			{
+				LastSurfaceRequest = DisplayTime;
+				Ocean->RequestSurfaceCheck();
+			}
+		}
+	}
+	if (!FrameLogPath.IsEmpty())
+	{
+		FrameLines.Add(FString::Printf(TEXT("%.6f,%.6f,%.6f,%d,%.6f"), FPlatformTime::Seconds(), DeltaSeconds, LastPhysicsTime, Stamp >= 0.0 ? 1 : 0, DisplayTime));
+	}
+	LogStatus(LastPhysicsTime);
+	if (CheckSec > 0.0 && DisplayTime - FirstDisplayTime >= CheckSec)
+	{
+		FinishCheck(DisplayTime);
 	}
 }

@@ -46,19 +46,48 @@ pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 終わり�
 * ★ `PduManager::ReadPduRawData` は受信した PDU を 1 回だけ返す（読むと消える）。新しい値が無いフレームは前の姿勢のまま。
 * 状態のログ（5 秒ごと）に fps・ゲーム／描画スレッドと GPU の時間・最長フレーム・前面の割合を出す。
 
+## 海面・空（Step 3）
+
+```powershell
+pwsh scripts\windows\ship_scene.ps1 -Build                 # 材質（/Game/Ship/Generated）と地図を作り直す
+pwsh scripts\windows\ship_scene.ps1 -Smoke -Shot           # 波面の計算の一致・描いた海面の高さを確かめ、画面を撮る
+pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 実物理との結合（海面の検証を含む）
+```
+
+* **波面は物理と同じコード**（D4）：hakoniwa-mujoco-ship の `wave_spectrum.hpp` を `Source/HakoniwaShip/Public/ThirdParty/` に写して使う
+  （`tools/gen_fleet_config.py` が写し、`--check` で同じか確かめる）。JONSWAP 32 成分の Gerstner 波。成分の表（波数・振幅・位相）を
+  CPU が倍精度で作り、位相に「メッシュの中心と時刻」を畳み込んで浮動小数のテクスチャで GPU に渡す（Godot の `ocean.gd` と同じ考え方）。
+  頂点は上下だけ動かすので、描いた海面は物理の η(x, y, t) と同じ点で同じ高さ。式は `ShipOceanShader.h`（材質の HLSL）。
+* **波浪パラメータ**は Disturbance PDU（`OwnShip/maritime_disturbance`、Godot と同じ取り出し）。箱庭につながないときは `fleet_ue.json` の `wave.preview`。
+* **表示時刻**：物理は 50 Hz、描画は 130〜200 FPS。受信した値をそのまま描くと 2〜4 フレームごとに飛んでカクつくので、
+  なめらかに進む表示時刻（最新の物理時刻の 0.04 s 後ろ）で船・関節を補間し、海面も同じ時刻で描く（D19 の考え方のまま、船と海面は同じ時刻）。
+  ★ `ship_plant` は全船の `pos` を書いてから時刻つきの `joint_states` を書くので、`pos` を先に読み、時刻が届いたらその時刻の値とする。
+* **メッシュ**：2.4 km 四方・4 m 格子（カメラに付いて格子の間隔で動く）＋外側 40 km 四方の平面（法線は同じ式。180 km にすると光が当たらず黒い帯になった）。
+  見た目だけの細かい波（16 成分）は法線にだけ足す。遠くは傾きを弱めて粗さを上げる。
+* **空**：江の島の Godot シーン（`D:\work_godot\3DMode_enoshima_PC`）と同じ Poly Haven の空パノラマ（CC0）を 2k に縮めたもの
+  （`tools/make_sky_hdri.py` → `SourceArt/Sky/sky_2k.exr`・`sky.json`）。空の球に貼って空の光が実時間で取り込む。太陽（平行光）はパノラマの太陽の向き・
+  照度（約 9 万 lx）で、パノラマの太陽の円盤は抑えてある。霧は水平線の空の色。水の色は江の島の海の deep / shallow。
+* ★ 物理単位の昼光（露出 EV 13 前後）なので `r.EyeAdaptation.CachedLightingPreExposure=8`（`Config/DefaultEngine.ini`）。
+  既定の 4 だと Lumen と空の光の取り込みがクリップされ、画面に赤い警告が出る（ログには出ない。`-ShipShot` の画像には写る）。
+* 検証：
+  1. `-ShipWaveParity=<reference.json>`：`wave_spectrum.hpp` の成分と波面を Godot の `tests/unit/wave_parity/reference.json`（Python 実装の値）と比べる（`HAKONIWA_UNREAL_SHIP_WAVE_PARITY_OK`）。
+  2. 描いた海面の高さ（`AShipOcean`）：真上からの正射影の深度で、描いた海面を格子の頂点で読み、CPU の η と比べる（許容 5 mm。実測 9e-5 m）。
+  3. 結合テスト：波浪パラメータ、海面の時刻 = 船の表示時刻、船体の上下動と海面の相関（Godot と同じ閾値 0.8・水線 RMS 0.4 m）、
+     表示時刻が止まったフレームの割合（5 % 以下）。物理の trace は表示時刻に同じ式で補間して照合する。
+
 ## 場面（Step 1）
 
 | 要素 | 中身 |
 |---|---|
 | 座標 | PDU の世界（右手系 m・ENU、船体は FLU）→ Unreal = (100x, −100y, 100z)（`ShipFrame.h`。rover の `RoverFrame.h` と同じ） |
-| 光・空 | 太陽（平行光・仰角 35°・大気の太陽）、空の大気、空の光（実時間取得）、高さの霧 |
-| 海面 | 仮の板（平均海面 z = 0・4 km 四方）。決定論的 Gerstner 波面（D4、海面の時刻は物理時刻＝D19）は Step 3 |
+| 光・空 | Step 3 で空のパノラマ・パノラマの太陽・霧に（上） |
+| 海面 | Step 3 で決定論的 Gerstner 波面に（上） |
 | 見る人 | 姿の無い観客（`AShipViewGameMode`）。マウスは捕まえない |
 
 ## これから（SHP-24）
 
 1. ~~Step 2：`AShipActor` に船の姿勢（D14・D18）と関節（`joint_states`）を反映する~~（済）
-2. Step 3：海面を D4 の Gerstner 波で描く（時刻は D19）
+2. ~~Step 3：海面を D4 の Gerstner 波で描く（時刻は D19）~~（済）
 3. Step 4：新しい glb（塗装・上部構造物つき）を取り込み、Godot 側と見た目をそろえる
 
 ## ライセンス

@@ -1,0 +1,28 @@
+{
+  "source": "kloofendal_48d_partly_cloudy_puresky_4k.exr",
+  "license": "CC0 (Poly Haven)",
+  "pixel_dir": "el = pi/2 - (r+0.5)/H*pi, az = 2*pi*(c+0.5)/W (ENU, from east counter-clockwise)",
+  "sun_dir_enu": [
+    -0.554401,
+    -0.377602,
+    0.741658
+  ],
+  "sun_elevation_deg": 47.87,
+  "sun_azimuth_enu_deg": -145.74,
+  "clamped_pixels_4k": 4447,
+  "sun_irradiance": 4.4606,
+  "sun_rgb_norm": [
+    0.9916,
+    1.0,
+    0.9102
+  ],
+  "horizon_rgb": [
+    0.4272,
+    0.4598,
+    0.5558
+  ],
+  "size": [
+    2048,
+    1024
+  ]
+}

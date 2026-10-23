@@ -11,6 +11,8 @@ public class HakoniwaShipEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] {
 			"Core", "CoreUObject", "Engine", "UnrealEd", "AssetRegistry",
 			"HakoniwaShip",
+			// 海面・空の材質と空の画像の取り込み（Step 3）
+			"MaterialEditor", "AssetTools", "Json",
 		});
 	}
 }

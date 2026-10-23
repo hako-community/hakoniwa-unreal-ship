@@ -1,31 +1,63 @@
 // HakoniwaShipEditor.cpp
-// 海の場面を組む入口（SHP-24 Step 1）。hakoniwa-unreal-rover の HakoniwaRoverEditor と同じ形。
+// 海の場面を組む入口（SHP-24）。hakoniwa-unreal-rover の HakoniwaRoverEditor と同じ形。
 //   自動：UnrealEditor.exe <uproject> -ShipBuildScene [-ShipMap=/Game/...] [-ShipQuit]
 //   手で：エディタのコンソールで  Ship.BuildScene [-ShipMap=/Game/...]
 //
-// 場面：太陽（平行光）・空の大気・空の光・高さの霧・仮の海面（平らな板。Gerstner 波面は Step 3）・観客の開始位置・船団（AShipFleet、Step 2）。
+// 場面（Step 3）：江の島の Godot シーン（D:\work_godot\3DMode_enoshima_PC）にならい、
+//   空    ：Poly Haven の空パノラマ（SourceArt/Sky/sky_2k.exr、tools/make_sky_hdri.py）を空の球に貼り、空の光はそれを実時間で取り込む
+//   太陽  ：パノラマの太陽の向き（SourceArt/Sky/sky.json）の平行光。照度と空の輝度の比はパノラマのまま
+//   霧    ：水平線の空の色の高さの霧（遠くの海を空になじませる）
+//   海面  ：AShipOcean（物理と同じ決定論的 Gerstner 波面、D4・D19）。材質は ShipOceanShader.h の HLSL から作る
+//   観客の開始位置・船団（AShipFleet、Step 2）
+// 作る資産は /Game/Ship/Generated（材質・空の画像）と地図。どちらも生成物（git に入れない）。
 
+#include "AssetImportTask.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetToolsModule.h"
 #include "Components/DirectionalLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Containers/Ticker.h"
+#include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "Engine/Texture2D.h"
 #include "FileHelpers.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameFramework/WorldSettings.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
+#include "MaterialEditingLibrary.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpressionCameraVectorWS.h"
+#include "Materials/MaterialExpressionComponentMask.h"
+#include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionObjectPositionWS.h"
+#include "Materials/MaterialExpressionPixelDepth.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionSubtract.h"
+#include "Materials/MaterialExpressionTextureObjectParameter.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialExpressionWorldPosition.h"
 #include "Misc/CommandLine.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "ShipFleet.h"
 #include "ShipFrame.h"
+#include "ShipOcean.h"
+#include "ShipOceanShader.h"
 #include "ShipViewGameMode.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogShipEditor, Log, All);
@@ -33,6 +65,12 @@ DEFINE_LOG_CATEGORY_STATIC(LogShipEditor, Log, All);
 namespace
 {
 	const TCHAR* DefaultMap = TEXT("/Game/Ship/Levels/ShipSea");
+	const TCHAR* GeneratedDir = TEXT("/Game/Ship/Generated");
+	// 空の画像の値 → Unreal の輝度 [cd/m²]・照度 [lx]。太陽の照度がおよそ 9 万 lx（晴れの昼）になる倍率
+	constexpr double SkyNitsPerUnit = 20000.0;
+	// 江の島の海（enoshima.tscn の ShaderMaterial_ocean の deep_color / shallow_color、sRGB）を線形にした色
+	const FLinearColor DeepColor = FLinearColor::FromSRGBColor(FColor(18, 38, 55));
+	const FLinearColor ShallowColor = FLinearColor::FromSRGBColor(FColor(23, 71, 74));
 
 	FString ParseMap(const TCHAR* Cmd)
 	{
@@ -41,8 +79,266 @@ namespace
 		return Map;
 	}
 
+	/** /Game/Ship/Generated/<Name> の材質。あれば式をすべて消して作り直す（参照は保たれる） */
+	UMaterial* MakeMaterial(const FString& Name)
+	{
+		const FString PackageName = FString(GeneratedDir) / Name;
+		UMaterial* M = LoadObject<UMaterial>(nullptr, *(PackageName + TEXT(".") + Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (M)
+		{
+			UMaterialEditingLibrary::DeleteAllMaterialExpressions(M);
+		}
+		else
+		{
+			UPackage* Package = CreatePackage(*PackageName);
+			M = NewObject<UMaterial>(Package, *Name, RF_Public | RF_Standalone | RF_Transactional);
+			FAssetRegistryModule::AssetCreated(M);
+		}
+		M->Modify();
+		return M;
+	}
+
+	template <typename T>
+	T* Add(UMaterial* M, int32 X, int32 Y)
+	{
+		return Cast<T>(UMaterialEditingLibrary::CreateMaterialExpression(M, T::StaticClass(), X, Y));
+	}
+
+	UMaterialExpressionScalarParameter* Scalar(UMaterial* M, const TCHAR* Name, float Value, int32 Y)
+	{
+		auto* P = Add<UMaterialExpressionScalarParameter>(M, -900, Y);
+		P->ParameterName = Name;
+		P->DefaultValue = Value;
+		return P;
+	}
+
+	UMaterialExpressionVectorParameter* Vector(UMaterial* M, const TCHAR* Name, const FLinearColor& Value, int32 Y)
+	{
+		auto* P = Add<UMaterialExpressionVectorParameter>(M, -900, Y);
+		P->ParameterName = Name;
+		P->DefaultValue = Value;
+		return P;
+	}
+
+	/** Custom 式。Inputs は (名前, 式) の組 */
+	UMaterialExpressionCustom* Custom(UMaterial* M, const TCHAR* Desc, const FString& Code, ECustomMaterialOutputType Out,
+		const TArray<TPair<FString, UMaterialExpression*>>& Inputs, int32 X, int32 Y)
+	{
+		auto* C = Add<UMaterialExpressionCustom>(M, X, Y);
+		C->Description = Desc;
+		C->Code = Code;
+		C->OutputType = Out;
+		C->Inputs.Reset();
+		for (const auto& In : Inputs)
+		{
+			FCustomInput CI;
+			CI.InputName = FName(*In.Key);
+			CI.Input.Connect(0, In.Value);
+			C->Inputs.Add(CI);
+		}
+		return C;
+	}
+
+	UMaterialExpressionComponentMask* Mask(UMaterial* M, UMaterialExpression* From, bool R, bool G, bool B, bool A, int32 X, int32 Y)
+	{
+		auto* K = Add<UMaterialExpressionComponentMask>(M, X, Y);
+		K->R = R; K->G = G; K->B = B; K->A = A;
+		K->Input.Connect(0, From);
+		return K;
+	}
+
+	/** メッシュの中心からの相対位置 [cm]：WorldPosition（材質の変位を除く）− ObjectPosition */
+	UMaterialExpression* RelPosition(UMaterial* M)
+	{
+		auto* Wp = Add<UMaterialExpressionWorldPosition>(M, -1200, -400);
+		Wp->WorldPositionShaderOffset = WPT_ExcludeAllShaderOffsets;
+		auto* Op = Add<UMaterialExpressionObjectPositionWS>(M, -1200, -300);
+		auto* Sub = Add<UMaterialExpressionSubtract>(M, -1000, -350);
+		Sub->A.Connect(0, Wp);
+		Sub->B.Connect(0, Op);
+		return Sub;
+	}
+
+	bool Finish(UMaterial* M)
+	{
+		UMaterialEditingLibrary::LayoutMaterialExpressions(M);
+		UMaterialEditingLibrary::RecompileMaterial(M);
+		M->MarkPackageDirty();
+		UE_LOG(LogShipEditor, Log, TEXT("material %s: %d expressions"), *M->GetPathName(), M->GetExpressions().Num());
+		return true;
+	}
+
+	/** 波面メッシュの材質（ShipOceanShader の WPO・画素の式） */
+	UMaterial* BuildOceanMaterial()
+	{
+		using namespace ShipOceanShader;
+		UMaterial* M = MakeMaterial(TEXT("M_ShipOcean"));
+		M->BlendMode = BLEND_Opaque;
+		M->SetShadingModel(MSM_DefaultLit);
+		M->bTangentSpaceNormal = false;   // 世界の法線を直接出す
+		UMaterialExpression* Rel = RelPosition(M);
+		auto* Tex = Add<UMaterialExpressionTextureObjectParameter>(M, -900, 0);
+		Tex->ParameterName = TEXT("WaveTex");
+		Tex->Texture = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineResources/Black.Black"));
+		auto* Count = Scalar(M, TEXT("WaveCount"), 0.0f, 100);
+		auto* Ripple = Scalar(M, TEXT("RippleCount"), 0.0f, 200);
+		auto* Tide = Scalar(M, TEXT("Tide"), 0.0f, 300);
+		auto* FadeStart = Scalar(M, TEXT("FadeStart"), 950.0f, 400);
+		auto* FadeEnd = Scalar(M, TEXT("FadeEnd"), 1180.0f, 500);
+		auto* HorizDisp = Scalar(M, TEXT("HorizDisp"), 0.0f, 600);
+		auto* Depth = Add<UMaterialExpressionPixelDepth>(M, -900, 700);
+		auto* Wpo = Custom(M, TEXT("ShipWaveWPO"), WpoCode(), CMOT_Float3,
+			{ { TEXT("Rel"), Rel }, { TEXT("WaveTex"), Tex }, { TEXT("WaveCount"), Count }, { TEXT("Tide"), Tide },
+			  { TEXT("FadeStart"), FadeStart }, { TEXT("FadeEnd"), FadeEnd }, { TEXT("HorizDisp"), HorizDisp } }, -500, 0);
+		const FString Pixel = FString(PixelCode()).Replace(TEXT("MAX_WAVES"), *FString::FromInt(MaxWaves));
+		auto* Px = Custom(M, TEXT("ShipWavePixel"), Pixel, CMOT_Float4,
+			{ { TEXT("Rel"), Rel }, { TEXT("WaveTex"), Tex }, { TEXT("WaveCount"), Count }, { TEXT("RippleCount"), Ripple },
+			  { TEXT("FadeStart"), FadeStart }, { TEXT("FadeEnd"), FadeEnd }, { TEXT("Depth"), Depth } }, -500, 300);
+		auto* Normal = Mask(M, Px, true, true, true, false, -250, 300);
+		auto* Height = Mask(M, Px, false, false, false, true, -250, 400);
+		auto* Color = Custom(M, TEXT("ShipWaterColor"), ColorCode(), CMOT_Float3,
+			{ { TEXT("H"), Height }, { TEXT("Deep"), Vector(M, TEXT("DeepColor"), DeepColor, 800) },
+			  { TEXT("Shallow"), Vector(M, TEXT("ShallowColor"), ShallowColor, 900) } }, -250, 500);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Wpo, FString(), MP_WorldPositionOffset);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Normal, FString(), MP_Normal);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Color, FString(), MP_BaseColor);
+		auto* Rough = Custom(M, TEXT("ShipWaterRoughness"), RoughnessCode(), CMOT_Float1,
+			{ { TEXT("Base"), Scalar(M, TEXT("Roughness"), 0.05f, 1000) }, { TEXT("Depth"), Depth } }, -250, 700);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Rough, FString(), MP_Roughness);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Scalar(M, TEXT("Specular"), 0.3f, 1100), FString(), MP_Specular);
+		return Finish(M) ? M : nullptr;
+	}
+
+	/** 外側の平面（潮位面）の材質：内側は描かない。高さは平らで、傾き（法線）・色・粗さは波面メッシュと同じ式（継ぎ目を目立たせない） */
+	UMaterial* BuildFarMaterial()
+	{
+		using namespace ShipOceanShader;
+		UMaterial* M = MakeMaterial(TEXT("M_ShipOceanFar"));
+		M->BlendMode = BLEND_Masked;
+		M->SetShadingModel(MSM_DefaultLit);
+		M->bTangentSpaceNormal = false;
+		UMaterialExpression* Rel = RelPosition(M);
+		auto* Hole = Scalar(M, TEXT("Hole"), 1150.0f, 0);
+		auto* Opacity = Custom(M, TEXT("ShipFarMask"), FarMaskCode(), CMOT_Float1,
+			{ { TEXT("Rel"), Rel }, { TEXT("Hole"), Hole } }, -500, 0);
+		auto* Tex = Add<UMaterialExpressionTextureObjectParameter>(M, -900, 100);
+		Tex->ParameterName = TEXT("WaveTex");
+		Tex->Texture = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineResources/Black.Black"));
+		auto* Count = Scalar(M, TEXT("WaveCount"), 0.0f, 200);
+		auto* NoRipple = Scalar(M, TEXT("RippleCount"), 0.0f, 300);
+		auto* NoFade = Scalar(M, TEXT("FadeStart"), 1.0e9f, 400);
+		auto* NoFadeEnd = Scalar(M, TEXT("FadeEnd"), 2.0e9f, 500);
+		auto* Depth = Add<UMaterialExpressionPixelDepth>(M, -900, 600);
+		const FString Pixel = FString(PixelCode()).Replace(TEXT("MAX_WAVES"), *FString::FromInt(MaxWaves));
+		auto* Px = Custom(M, TEXT("ShipWavePixel"), Pixel, CMOT_Float4,
+			{ { TEXT("Rel"), Rel }, { TEXT("WaveTex"), Tex }, { TEXT("WaveCount"), Count }, { TEXT("RippleCount"), NoRipple },
+			  { TEXT("FadeStart"), NoFade }, { TEXT("FadeEnd"), NoFadeEnd }, { TEXT("Depth"), Depth } }, -500, 300);
+		auto* Normal = Mask(M, Px, true, true, true, false, -250, 300);
+		auto* Height = Mask(M, Px, false, false, false, true, -250, 400);
+		auto* Color = Custom(M, TEXT("ShipWaterColor"), ColorCode(), CMOT_Float3,
+			{ { TEXT("H"), Height }, { TEXT("Deep"), Vector(M, TEXT("DeepColor"), DeepColor, 800) },
+			  { TEXT("Shallow"), Vector(M, TEXT("ShallowColor"), ShallowColor, 900) } }, -250, 500);
+		auto* Rough = Custom(M, TEXT("ShipWaterRoughness"), RoughnessCode(), CMOT_Float1,
+			{ { TEXT("Base"), Scalar(M, TEXT("Roughness"), 0.05f, 1000) }, { TEXT("Depth"), Depth } }, -250, 700);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Opacity, FString(), MP_OpacityMask);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Normal, FString(), MP_Normal);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Color, FString(), MP_BaseColor);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Rough, FString(), MP_Roughness);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Scalar(M, TEXT("Specular"), 0.3f, 1100), FString(), MP_Specular);
+		return Finish(M) ? M : nullptr;
+	}
+
+	/** 空の画像（SourceArt/Sky/sky_2k.exr）を取り込む。正距円筒の 2D の HDR 画像として使う */
+	UTexture2D* ImportSky()
+	{
+		const FString File = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("SourceArt/Sky/sky_2k.exr"));
+		UAssetImportTask* Task = NewObject<UAssetImportTask>();
+		Task->Filename = File;
+		Task->DestinationPath = GeneratedDir;
+		Task->DestinationName = TEXT("T_Sky");
+		Task->bAutomated = true;
+		Task->bReplaceExisting = true;
+		Task->bSave = false;
+		FAssetToolsModule::GetModule().Get().ImportAssetTasks({ Task });
+		UTexture2D* Tex = nullptr;
+		for (UObject* O : Task->GetObjects())
+		{
+			UE_LOG(LogShipEditor, Log, TEXT("imported %s -> %s (%s)"), *File, *O->GetPathName(), *O->GetClass()->GetName());
+			Tex = Tex ? Tex : Cast<UTexture2D>(O);
+		}
+		if (!Tex)
+		{
+			UE_LOG(LogShipEditor, Error, TEXT("sky texture not imported as Texture2D: %s"), *File);
+			return nullptr;
+		}
+		Tex->Modify();
+		Tex->CompressionSettings = TC_HDR_Compressed;
+		Tex->SRGB = false;
+		Tex->MipGenSettings = TMGS_NoMipmaps;
+		Tex->LODGroup = TEXTUREGROUP_Skybox;
+		Tex->AddressX = TA_Wrap;
+		Tex->AddressY = TA_Clamp;
+		Tex->PostEditChange();
+		Tex->MarkPackageDirty();
+		return Tex;
+	}
+
+	/** 空の球の材質：視線の向きで正距円筒の画像を引く（光らない・空として空の光に取り込まれる） */
+	UMaterial* BuildSkyMaterial(UTexture2D* SkyTex)
+	{
+		UMaterial* M = MakeMaterial(TEXT("M_ShipSky"));
+		M->SetShadingModel(MSM_Unlit);
+		M->TwoSided = true;
+		M->bIsSky = true;
+		auto* Cam = Add<UMaterialExpressionCameraVectorWS>(M, -900, 0);
+		auto* Uv = Custom(M, TEXT("ShipSkyUv"), ShipOceanShader::SkyUvCode(), CMOT_Float2, { { TEXT("CamVec"), Cam } }, -600, 0);
+		auto* Sample = Add<UMaterialExpressionTextureSampleParameter2D>(M, -350, 0);
+		Sample->ParameterName = TEXT("SkyTex");
+		Sample->Texture = SkyTex;
+		Sample->SamplerType = SAMPLERTYPE_LinearColor;
+		Sample->MipValueMode = TMVM_MipLevel;   // 経度 0/360° の継ぎ目で詳細度が飛ばないよう、いつも最も細かい画像
+		Sample->Coordinates.Connect(0, Uv);
+		auto* Zero = Add<UMaterialExpressionConstant>(M, -600, 150);
+		Zero->R = 0.0f;
+		Sample->MipValue.Connect(0, Zero);
+		auto* Mul = Add<UMaterialExpressionMultiply>(M, -100, 0);
+		Mul->A.Connect(0, Sample);
+		Mul->B.Connect(0, Scalar(M, TEXT("SkyNits"), SkyNitsPerUnit, 200));
+		UMaterialEditingLibrary::ConnectMaterialProperty(Mul, FString(), MP_EmissiveColor);
+		return Finish(M) ? M : nullptr;
+	}
+
+	TSharedPtr<FJsonObject> LoadSkyInfo()
+	{
+		FString Text;
+		TSharedPtr<FJsonObject> Root;
+		const FString File = FPaths::ProjectDir() / TEXT("SourceArt/Sky/sky.json");
+		if (!FFileHelper::LoadFileToString(Text, *File) || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Root))
+		{
+			UE_LOG(LogShipEditor, Error, TEXT("not readable: %s"), *File);
+			return nullptr;
+		}
+		return Root;
+	}
+
+	FVector JsonVec(const TSharedPtr<FJsonObject>& O, const TCHAR* Key)
+	{
+		const TArray<TSharedPtr<FJsonValue>>& A = O->GetArrayField(Key);
+		return FVector(A[0]->AsNumber(), A[1]->AsNumber(), A[2]->AsNumber());
+	}
+
 	bool BuildScene()
 	{
+		const TSharedPtr<FJsonObject> SkyInfo = LoadSkyInfo();
+		UTexture2D* SkyTex = ImportSky();
+		UMaterial* OceanMat = BuildOceanMaterial();
+		UMaterial* FarMat = BuildFarMaterial();
+		UMaterial* SkyMat = SkyTex ? BuildSkyMaterial(SkyTex) : nullptr;
+		UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+		if (!SkyInfo || !OceanMat || !FarMat || !SkyMat || !Sphere)
+		{
+			return false;
+		}
 		UWorld* World = GEditor ? GEditor->NewMap(false) : nullptr;
 		if (!World)
 		{
@@ -50,46 +346,55 @@ namespace
 		}
 		World->GetWorldSettings()->DefaultGameMode = AShipViewGameMode::StaticClass();
 
-		// 太陽：仰角 35°・方位は南東から（光は太陽から来る向き）。
+		// 太陽：パノラマの太陽の向き（ENU）。光は太陽から来る向き。照度 = パノラマの太陽の放射照度 × 空の倍率
 		// ★ ADirectionalLight は生成時に光へピッチ −46° を入れていて、スポーンの回転に足される（rover の README）。回転は生成のあとで決める
-		const FVector ToSunUe = ShipFrame::LocalDirToUnreal(0.57, -0.57, 0.57);
+		const FVector SunEnu = JsonVec(SkyInfo, TEXT("sun_dir_enu"));
+		const FVector SunRgb = JsonVec(SkyInfo, TEXT("sun_rgb_norm"));
+		const double SunLux = SkyInfo->GetNumberField(TEXT("sun_irradiance")) * SkyNitsPerUnit;
 		ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>();
-		Sun->SetActorRotation((-ToSunUe).Rotation());
+		Sun->SetActorRotation((-ShipFrame::LocalDirToUnreal(SunEnu.X, SunEnu.Y, SunEnu.Z)).Rotation());
 		Sun->SetActorLabel(TEXT("Sun"));
 		UDirectionalLightComponent* SunC = CastChecked<UDirectionalLightComponent>(Sun->GetLightComponent());
 		SunC->SetMobility(EComponentMobility::Movable);
-		SunC->SetIntensity(10.0f);
-		SunC->SetAtmosphereSunLight(true);
+		SunC->SetIntensity(SunLux);
+		SunC->SetLightColor(FLinearColor(SunRgb.X, SunRgb.Y, SunRgb.Z));
 		SunC->SetCastShadows(true);
 
-		AActor* Sky = World->SpawnActor<AActor>();
-		USkyAtmosphereComponent* SkyC = NewObject<USkyAtmosphereComponent>(Sky, TEXT("SkyAtmosphere"));
-		Sky->SetRootComponent(SkyC);
-		Sky->AddInstanceComponent(SkyC);
-		SkyC->RegisterComponent();
-		Sky->SetActorLabel(TEXT("SkyAtmosphere"));
+		// 空の球（半径 100 km。材質は向きだけで引くので位置は問わない）
+		AStaticMeshActor* SkySphere = World->SpawnActor<AStaticMeshActor>();
+		SkySphere->SetActorLabel(TEXT("SkySphere"));
+		UStaticMeshComponent* SkyC = SkySphere->GetStaticMeshComponent();
+		SkyC->SetMobility(EComponentMobility::Movable);
+		SkyC->SetStaticMesh(Sphere);
+		SkyC->SetMaterial(0, SkyMat);
+		SkyC->SetCastShadow(false);
+		SkyC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		SkyC->bAffectDistanceFieldLighting = false;
+		SkyC->bAffectDynamicIndirectLighting = false;
+		SkySphere->SetActorScale3D(FVector(200000.0));   // エンジンの Sphere は直径 1 m
 
 		ASkyLight* SkyLight = World->SpawnActor<ASkyLight>();
 		SkyLight->SetActorLabel(TEXT("SkyLight"));
 		USkyLightComponent* SkyLightC = SkyLight->GetLightComponent();
 		SkyLightC->SetMobility(EComponentMobility::Movable);
-		SkyLightC->bRealTimeCapture = true;
+		SkyLightC->bRealTimeCapture = true;   // 空の球（bIsSky の材質）を取り込む
+		SkyLightC->bLowerHemisphereIsBlack = false;   // パノラマの下半分（空の映り込み）も使う。波で下向きに反射した光が黒くならない
 
+		// 霧：水平線の空の色
+		const FVector Horizon = JsonVec(SkyInfo, TEXT("horizon_rgb")) * SkyNitsPerUnit;
 		AExponentialHeightFog* Fog = World->SpawnActor<AExponentialHeightFog>();
 		Fog->SetActorLabel(TEXT("HeightFog"));
+		UExponentialHeightFogComponent* FogC = Fog->GetComponent();
+		FogC->SetFogDensity(0.0015f);
+		FogC->SetFogHeightFalloff(0.05f);
+		FogC->SetFogInscatteringColor(FLinearColor(Horizon.X, Horizon.Y, Horizon.Z));
+		FogC->SetFogCutoffDistance(9.5e6f);   // 空の球（100 km）には掛けない
 
-		// 仮の海面：平均海面（z = 0）に 4 km 四方の板（エンジンの Plane は 1 m 四方）
-		AStaticMeshActor* Sea = World->SpawnActor<AStaticMeshActor>();
-		Sea->SetActorLabel(TEXT("SeaPlaceholder"));
-		UStaticMesh* Plane = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
-		if (!Plane)
-		{
-			UE_LOG(LogShipEditor, Error, TEXT("/Engine/BasicShapes/Plane not found"));
-			return false;
-		}
-		Sea->GetStaticMeshComponent()->SetStaticMesh(Plane);
-		Sea->SetActorLocation(ShipFrame::LocalToUnreal(0.0, 0.0, 0.0));
-		Sea->SetActorScale3D(FVector(4000.0, 4000.0, 1.0));
+		// 海面（Step 3）
+		AShipOcean* Ocean = World->SpawnActor<AShipOcean>();
+		Ocean->SetActorLabel(TEXT("ShipOcean"));
+		Ocean->NearMaterial = OceanMat;
+		Ocean->FarMaterial = FarMat;
 
 		// 観客の開始位置：原点の南西 約 280 m・高さ 40 m から北東を見る
 		APlayerStart* Start = World->SpawnActor<APlayerStart>(ShipFrame::LocalToUnreal(-200.0, -200.0, 40.0),
@@ -100,7 +405,8 @@ namespace
 		AShipFleet* Fleet = World->SpawnActor<AShipFleet>();
 		Fleet->SetActorLabel(TEXT("ShipFleet"));
 
-		UE_LOG(LogShipEditor, Log, TEXT("scene built: sun, sky, fog, sea placeholder, view start, ship fleet"));
+		UE_LOG(LogShipEditor, Log, TEXT("scene built: sun %.0f lx (el %.1f deg), sky sphere, sky light, fog, ocean, view start, ship fleet"),
+			SunLux, SkyInfo->GetNumberField(TEXT("sun_elevation_deg")));
 		return true;
 	}
 

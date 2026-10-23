@@ -6,8 +6,12 @@
   ../pdu_config_ship.json                                  PDU の表（型・チャネル・大きさ）
   ../hakoniwa-godot-ship/Models/<model>/<model>.glb        船体・可動部のノード（原点）とメッシュの外形
   ../hakoniwa-godot-ship/Models/<model>/ship_sync.profile.json   関節名・ノード名・回転軸（FLU）
+  ../hakoniwa-godot-ship/tests/integration/plant_coupling/expected.json   結合テストの期待値（波浪・船の水線面の範囲・閾値、Step 3）
+  ../hakoniwa-mujoco-ship/include/ship/environment/wave_spectrum.hpp     物理と同じ波面の計算（D4、Step 3）
 
-出力（コミット対象）: Config/Fleet/fleet_ue.json
+出力（コミット対象）:
+  Config/Fleet/fleet_ue.json
+  Source/HakoniwaShip/Public/ThirdParty/wave_spectrum.hpp（物理の wave_spectrum.hpp の写し。内容は変えない）
   座標はすべて FLU（右手系 m、x 前・y 左・z 上）。glb（glTF、Y 上）からは x = -Z, y = -X, z = +Y で戻す
   （Godot の hakoniwa_robot_sync の x→-Z, y→-X, z→+Y の逆）。Unreal への写像は ShipFrame.h。
   parts は Step 2 の仮の形（メッシュごとの外形の箱）。Step 4 で glb の取り込みに置き換える。
@@ -24,6 +28,12 @@ PROJECT = Path(__file__).resolve().parent.parent
 SHIPNAVI = PROJECT.parent
 GODOT = SHIPNAVI / "hakoniwa-godot-ship"
 OUT = PROJECT / "Config" / "Fleet" / "fleet_ue.json"
+WAVE_SRC = SHIPNAVI / "hakoniwa-mujoco-ship" / "include" / "ship" / "environment" / "wave_spectrum.hpp"
+WAVE_OUT = PROJECT / "Source" / "HakoniwaShip" / "Public" / "ThirdParty" / "wave_spectrum.hpp"
+PLANT_EXPECTED = GODOT / "tests" / "integration" / "plant_coupling" / "expected.json"
+# 物理プラグイン（ship_hydro_plugin.cpp の update_wave_engine_if_needed）と同じ成分数・有効化の閾値
+WAVE_COMPONENTS = 32
+WAVE_ACTIVE_HS = 0.01
 ASSET_NAME = "UnrealShipViewer"
 
 # ship_sync.profile.json の軸 → FLU の単位ベクトル
@@ -172,6 +182,8 @@ def build() -> dict:
     clock = fleet["physics_clock"]
     if (clock["robot"], clock["pdu"]) not in wanted:
         wanted.append((clock["robot"], clock["pdu"]))
+    dist = fleet["disturbance"]
+    wanted.append((dist["robot"], dist["pdu"]))
     pdus = []
     for robot, name in wanted:
         p = table.get((robot, name))
@@ -184,8 +196,27 @@ def build() -> dict:
         "generated_by": "tools/gen_fleet_config.py (from hakoniwa-godot-ship/config/fleet.json, pdu_config_ship.json, Models/*.glb)",
         "asset_name": ASSET_NAME,
         "physics_clock": {"robot": clock["robot"], "pdu": clock["pdu"]},
+        "wave": {
+            "disturbance": {"robot": dist["robot"], "pdu": dist["pdu"]},
+            "num_components": WAVE_COMPONENTS,
+            "active_hs_m": WAVE_ACTIVE_HS,
+            "preview": fleet["preview_wave"],
+        },
+        "plant_check": plant_check(),
         "pdus": pdus,
         "ships": ships,
+    }
+
+
+def plant_check() -> dict:
+    """Godot の結合テストの期待値のうち、海面と船体の検証に使うもの（同じ値で比べる）。"""
+    e = load_json(PLANT_EXPECTED)
+    return {
+        "settle_s": e["settle_s"],
+        "heave_corr_min": e["heave_corr_min"],
+        "waterline_rms_max_m": e["waterline_rms_max_m"],
+        "wave": e["wave"],
+        "ships": {k: {"lpp_m": v["lpp_m"], "beam_m": v["beam_m"]} for k, v in e["ships"].items()},
     }
 
 
@@ -194,15 +225,20 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="生成物が最新か確かめるだけ（書かない）")
     a = ap.parse_args()
     text = json.dumps(build(), ensure_ascii=False, indent=2) + "\n"
+    wave = WAVE_SRC.read_bytes()
     if a.check:
-        if not OUT.exists() or OUT.read_text(encoding="utf-8") != text:
-            print(f"FLEET_CONFIG_STALE {OUT}")
+        stale = [str(f) for f, ok in ((OUT, OUT.exists() and OUT.read_text(encoding="utf-8") == text),
+                                      (WAVE_OUT, WAVE_OUT.exists() and WAVE_OUT.read_bytes() == wave)) if not ok]
+        if stale:
+            print(f"FLEET_CONFIG_STALE {' '.join(stale)}")
             return 1
         print("FLEET_CONFIG_OK")
         return 0
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(text, encoding="utf-8")
-    print(f"wrote {OUT}")
+    WAVE_OUT.parent.mkdir(parents=True, exist_ok=True)
+    WAVE_OUT.write_bytes(wave)
+    print(f"wrote {OUT}, {WAVE_OUT}")
     return 0
 
 

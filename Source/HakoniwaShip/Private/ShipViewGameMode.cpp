@@ -7,6 +7,8 @@
 #include "HAL/PlatformTime.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
+#include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogShipView, Log, All);
 
@@ -44,6 +46,10 @@ void AShipViewGameMode::StartPlay()
 void AShipViewGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (ExitCountdown >= 0 && --ExitCountdown < 0)
+	{
+		FPlatformMisc::RequestExitWithStatus(false, 0);
+	}
 	if (SmokeSec <= 0.0 || bSmokeDone)
 	{
 		return;
@@ -62,6 +68,14 @@ void AShipViewGameMode::Tick(float DeltaSeconds)
 		const double Fps = SmokeFrames / (Now - SmokeStart);
 		UE_LOG(LogShipView, Display, TEXT("HAKONIWA_UNREAL_SHIP_BOOT_OK frames=%lld fps=%.1f map=%s"),
 			SmokeFrames, Fps, *GetWorld()->GetMapName());
+		FString Shot;
+		if (FParse::Value(FCommandLine::Get(), TEXT("-ShipShot="), Shot) && !FParse::Param(FCommandLine::Get(), TEXT("ShipSync")))
+		{
+			// 撮影は次の描画で行われるので、数フレーム待ってから終わる
+			FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(Shot), true, false);   // 画面の警告（赤い文字）も写す
+			ExitCountdown = 30;
+			return;
+		}
 		FPlatformMisc::RequestExitWithStatus(false, 0);
 	}
 }

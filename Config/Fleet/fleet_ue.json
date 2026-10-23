@@ -6,6 +6,53 @@
     "robot": "OwnShip",
     "pdu": "joint_states"
   },
+  "wave": {
+    "disturbance": {
+      "robot": "OwnShip",
+      "pdu": "maritime_disturbance"
+    },
+    "num_components": 32,
+    "active_hs_m": 0.01,
+    "preview": {
+      "hs_m": 2.5,
+      "tp_s": 8.0,
+      "wave_dir_rad": 0.5,
+      "gamma": 3.3,
+      "seed": 42,
+      "water_depth_m": 100.0
+    }
+  },
+  "plant_check": {
+    "settle_s": 20.0,
+    "heave_corr_min": 0.8,
+    "waterline_rms_max_m": 0.4,
+    "wave": {
+      "hs_m": 2.5,
+      "tp_s": 8.0,
+      "wave_dir_rad": 0.5,
+      "gamma": 3.3,
+      "seed": 42,
+      "water_depth_m": 100.0
+    },
+    "ships": {
+      "OwnShip": {
+        "lpp_m": 90.0,
+        "beam_m": 14.0
+      },
+      "TargetShip01": {
+        "lpp_m": 124.0,
+        "beam_m": 21.0
+      },
+      "TargetShip02": {
+        "lpp_m": 60.0,
+        "beam_m": 14.0
+      },
+      "TargetShipFishing": {
+        "lpp_m": 10.5,
+        "beam_m": 3.2
+      }
+    }
+  },
   "pdus": [
     {
       "robot": "OwnShip",
@@ -41,6 +88,13 @@
       "type": "geometry_msgs/Twist",
       "channel_id": 23,
       "pdu_size": 72
+    },
+    {
+      "robot": "OwnShip",
+      "pdu": "maritime_disturbance",
+      "type": "hako_msgs/Disturbance",
+      "channel_id": 4,
+      "pdu_size": 256
     }
   ],
   "ships": [

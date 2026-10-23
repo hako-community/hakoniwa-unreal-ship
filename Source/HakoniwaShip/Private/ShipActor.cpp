@@ -101,6 +101,8 @@ bool AShipActor::BuildFromSpec(const TSharedPtr<FJsonObject>& Ship)
 void AShipActor::ApplyPose(const FVector& Linear, const FVector& Angular)
 {
 	const FMatrix R = ShipFrame::PduAngularToRotation(Angular.X, Angular.Y, Angular.Z);
+	// ★ UE は回転の変化が 1e-4°（FRotator::Equals の既定の許容）未満だと回転を書き換えない（SceneComponent.cpp）。
+	//   表示時刻で毎フレーム補間すると 1 フレームの変化がそれより小さいことがあり、最大 約 2e-6 rad 遅れる（見えない。検証の許容 1e-4 の内）
 	SetActorLocationAndRotation(ShipFrame::LocalToUnreal(Linear), ShipFrame::RotationToUnreal(R));
 }
 
