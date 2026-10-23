@@ -61,12 +61,12 @@
       "mount": [
         44.0,
         0.0,
-        7.2
+        8.7
       ],
       "origin": [
         44.0,
         0.0,
-        7.2
+        8.7
       ],
       "moved_out_m": 0.0,
       "fov_deg": 90.0,
@@ -81,16 +81,16 @@
       "pdu": "camera_bridge",
       "frame_id": "camera_bridge_front",
       "mount": [
-        -33.5,
+        -26.549999,
         0.0,
         15.5
       ],
       "origin": [
-        -26.400001,
+        -26.549999,
         0.0,
         15.5
       ],
-      "moved_out_m": 7.1,
+      "moved_out_m": 0.0,
       "fov_deg": 110.0,
       "width": 640,
       "height": 480,
@@ -921,10 +921,10 @@
         "camera_bow_center": [
           44.0,
           0.0,
-          7.2
+          8.7
         ],
         "camera_bridge_front": [
-          -33.5,
+          -26.549999,
           0.0,
           15.5
         ],
@@ -1737,10 +1737,10 @@
         "camera_bow_center": [
           61.5,
           0.0,
-          10.0
+          11.1
         ],
         "camera_bridge_front": [
-          -45.0,
+          -37.970001,
           0.0,
           20.5
         ],
@@ -2464,10 +2464,10 @@
         "camera_bow_center": [
           29.0,
           0.0,
-          6.0
+          7.4
         ],
         "camera_bridge_front": [
-          9.5,
+          11.62,
           0.0,
           12.2
         ],
