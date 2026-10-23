@@ -8,6 +8,8 @@
   ../hakoniwa-godot-ship/Models/<model>/ship_sync.profile.json   関節名・ノード名・回転軸（FLU）
   ../hakoniwa-godot-ship/tests/integration/plant_coupling/expected.json   結合テストの期待値（波浪・船の水線面の範囲・閾値、Step 3）
   ../hakoniwa-mujoco-ship/include/ship/environment/wave_spectrum.hpp     物理と同じ波面の計算（D4、Step 3）
+  ../../images/image2sim-framework/output/<model>/resolved_config.json  航海灯（色・射光範囲・視認距離、Step 5）。
+                                                                         物理（ship_plant の models_dir）と同じ船舶生成器の出力。glb のノードには載っていない
 
 出力（コミット対象）:
   Config/Fleet/fleet_ue.json
@@ -34,6 +36,7 @@ OUT = PROJECT / "Config" / "Fleet" / "fleet_ue.json"
 WAVE_SRC = SHIPNAVI / "hakoniwa-mujoco-ship" / "include" / "ship" / "environment" / "wave_spectrum.hpp"
 WAVE_OUT = PROJECT / "Source" / "HakoniwaShip" / "Public" / "ThirdParty" / "wave_spectrum.hpp"
 GLB_OUT = PROJECT / "SourceArt" / "Ships"
+SHIP_SPECS = SHIPNAVI.parent / "images" / "image2sim-framework" / "output"
 PLANT_EXPECTED = GODOT / "tests" / "integration" / "plant_coupling" / "expected.json"
 # 物理プラグイン（ship_hydro_plugin.cpp の update_wave_engine_if_needed）と同じ成分数・有効化の閾値
 WAVE_COMPONENTS = 32
@@ -123,6 +126,54 @@ def materials(g: dict) -> dict:
     return out
 
 
+def find_key(o, key):
+    if isinstance(o, dict):
+        if key in o:
+            return o[key]
+        for v in o.values():
+            r = find_key(v, key)
+            if r is not None:
+                return r
+    elif isinstance(o, list):
+        for v in o:
+            r = find_key(v, key)
+            if r is not None:
+                return r
+    return None
+
+
+def nav_light_intensity_cd(range_nm: float) -> float:
+    """COLREG 附属書 I 第 8 項：I = 3.43e6 × T × D² × K^-D（T = 2e-7 lx、K = 0.8）[cd]"""
+    return 3.43e6 * 2.0e-7 * range_nm ** 2 * 0.8 ** (-range_nm)
+
+
+def nav_lights(model: str, nodes: set) -> list:
+    """航海灯：射光範囲の中心は船首から右回り [deg]。マスト灯 0（225°）、右舷灯 +56.25・左舷灯 −56.25（各 112.5°、正船首から正横後 22.5° まで）、
+    船尾灯 180（135°）、全周灯 0（360°）。視点の方位がこの範囲にあるときだけ灯火が見える"""
+    spec = load_json(SHIP_SPECS / model / "resolved_config.json")
+    out = []
+    for lt in find_key(spec, "nav_lights") or []:
+        node = "navlight_" + lt["id"]
+        if node not in nodes:
+            raise SystemExit(f"{model}: nav light {node} not in the glb")
+        lid = lt["id"]
+        arc = float(lt.get("arc_deg", 225.0))
+        if arc >= 360.0:
+            center = 0.0
+        elif "starboard" in lid:
+            center = 56.25
+        elif "port" in lid:
+            center = -56.25
+        elif "stern" in lid:
+            center = 180.0
+        else:
+            center = 0.0
+        rng = float(lt.get("range_nm", 2.0))
+        out.append({"node": node, "color": lt.get("color", "white"), "arc_deg": arc, "center_deg": center,
+                    "range_nm": rng, "intensity_cd": round(nav_light_intensity_cd(rng), 3)})
+    return out
+
+
 def build_ship(ship: dict) -> dict:
     model = ship["model"]
     g = load_glb(GODOT / "Models" / model / f"{model}.glb")
@@ -181,6 +232,7 @@ def build_ship(ship: dict) -> dict:
         "parts": parts,
         "joints": joints,
         "materials": materials(g),
+        "nav_lights": nav_lights(model, {p["node"] for p in parts}),
         "ais": ship.get("ais", {}),
     }
     if ship.get("joint_states_pdu"):

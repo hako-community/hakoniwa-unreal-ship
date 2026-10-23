@@ -2,6 +2,8 @@
 
 #include "ShipActor.h"
 
+#include "Components/PointLightComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Dom/JsonObject.h"
 #include "Engine/StaticMesh.h"
@@ -95,7 +97,7 @@ UMaterialInterface* AShipActor::Paint(const FString& Slot, UMaterialInterface* P
 	return Result;
 }
 
-void AShipActor::AddPart(USceneComponent* Parent, const TSharedPtr<FJsonObject>& Part, const FVector& OriginFlu, const TSharedPtr<FJsonObject>& Materials)
+UStaticMeshComponent* AShipActor::AddPart(USceneComponent* Parent, const TSharedPtr<FJsonObject>& Part, const FVector& OriginFlu, const TSharedPtr<FJsonObject>& Materials)
 {
 	const FString Node = Part->GetStringField(TEXT("node"));
 	const FVector BoxMin = JsonVec3(Part, TEXT("box_min"));
@@ -104,9 +106,8 @@ void AShipActor::AddPart(USceneComponent* Parent, const TSharedPtr<FJsonObject>&
 	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/Ship/Generated/Ships/%s/%s.%s"), *Model, *Name, *Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	if (!Mesh)
 	{
-		AddBox(Parent, Node, BoxMin, BoxMax, JsonColor(Part));
 		++BoxParts;
-		return;
+		return AddBox(Parent, Node, BoxMin, BoxMax, JsonColor(Part));
 	}
 	UStaticMeshComponent* C = NewObject<UStaticMeshComponent>(this, *Node);
 	C->SetMobility(EComponentMobility::Movable);
@@ -132,6 +133,88 @@ void AShipActor::AddPart(USceneComponent* Parent, const TSharedPtr<FJsonObject>&
 	{
 		UE_LOG(LogShipActor, Warning, TEXT("%s/%s: mesh bounds differ from fleet_ue.json by %.4f m"), *Robot, *Node, Err);
 	}
+	return C;
+}
+
+void AShipActor::AddNavLight(UStaticMeshComponent* Lamp, const TSharedPtr<FJsonObject>& Spec, const TSharedPtr<FJsonObject>& Materials)
+{
+	FShipNavLight L;
+	L.Node = Spec->GetStringField(TEXT("node"));
+	L.Color = Spec->GetStringField(TEXT("color"));
+	L.CenterDeg = Spec->GetNumberField(TEXT("center_deg"));
+	L.ArcDeg = Spec->GetNumberField(TEXT("arc_deg"));
+	L.IntensityCd = Spec->GetNumberField(TEXT("intensity_cd"));
+	L.Lamp = Lamp;
+	// 灯の輝度 [cd/m²] = 光度 / 横から見た灯の面積（幅 × 高さ）。glb の発光の値（emissiveFactor × strength）の大きさで割って EmissiveNits にする
+	const FBox B = Lamp->GetStaticMesh() ? Lamp->GetStaticMesh()->GetBoundingBox() : FBox(FVector(-12.0), FVector(12.0));
+	const FVector Size = B.GetSize() / 100.0;
+	const double Area = FMath::Max(1.0e-4, FMath::Max(Size.X, Size.Y) * Size.Z);
+	for (int32 i = 0; i < Lamp->GetNumMaterials(); ++i)
+	{
+		// 灯ごとに材質を分ける（マスト灯と船尾灯は同じ材質）。★ 動的インスタンスは動的インスタンスを親にできないので、元の材質から作って値を入れ直す
+		UMaterialInterface* Base = Lamp->GetMaterial(i);
+		UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Base ? Base->GetMaterial() : nullptr, this);
+		if (!Mid)
+		{
+			continue;
+		}
+		const FString Slot = Lamp->GetStaticMesh() ? Lamp->GetStaticMesh()->GetStaticMaterials()[i].MaterialSlotName.ToString() : FString();
+		const TSharedPtr<FJsonObject>* M = nullptr;
+		FVector E = FVector::ZeroVector;
+		if (Materials && Materials->TryGetObjectField(Slot, M))
+		{
+			const FVector C = JsonVec3(*M, TEXT("base_color"));
+			E = JsonVec3(*M, TEXT("emissive"));
+			Mid->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(C.X, C.Y, C.Z));
+			Mid->SetScalarParameterValue(TEXT("Metallic"), (*M)->GetNumberField(TEXT("metallic")));
+			Mid->SetScalarParameterValue(TEXT("Roughness"), (*M)->GetNumberField(TEXT("roughness")));
+			Mid->SetVectorParameterValue(TEXT("Emissive"), FLinearColor(E.X, E.Y, E.Z));
+		}
+		const double EMax = E.GetMax();
+		Mid->SetScalarParameterValue(TEXT("EmissiveNits"), EMax > 0.0 ? L.IntensityCd / Area / EMax : 0.0);
+		Mid->SetScalarParameterValue(TEXT("SectorCenter"), L.CenterDeg);
+		Mid->SetScalarParameterValue(TEXT("SectorHalf"), L.ArcDeg * 0.5);
+		Lamp->SetMaterial(i, Mid);
+	}
+	// 光源：COLREG の色（白は白熱灯の暖色）、光度 [cd]。射光範囲 160° 以下はスポット（中心の向き・半角 = 範囲の半分）
+	const FLinearColor Color = L.Color == TEXT("red") ? FLinearColor(1.0f, 0.06f, 0.03f)
+		: L.Color == TEXT("green") ? FLinearColor(0.05f, 1.0f, 0.45f) : FLinearColor(1.0f, 0.9f, 0.75f);
+	ULocalLightComponent* Light = nullptr;
+	if (L.ArcDeg <= 160.0)
+	{
+		USpotLightComponent* Spot = NewObject<USpotLightComponent>(this, *(L.Node + TEXT("_light")));
+		Spot->SetOuterConeAngle(L.ArcDeg * 0.5);
+		Spot->SetInnerConeAngle(FMath::Max(0.0, L.ArcDeg * 0.5 - 2.0));
+		Spot->SetRelativeRotation(FRotator(0.0, L.CenterDeg, 0.0));   // Unreal の yaw は右回り（+Y = 右舷）
+		Light = Spot;
+	}
+	else
+	{
+		Light = NewObject<UPointLightComponent>(this, *(L.Node + TEXT("_light")));
+	}
+	Light->SetMobility(EComponentMobility::Movable);
+	Light->SetupAttachment(Lamp);
+	Light->SetIntensityUnits(ELightUnits::Candelas);
+	Light->SetIntensity(L.IntensityCd);
+	Light->SetLightColor(Color);
+	Light->SetAttenuationRadius(6000.0f);
+	Light->SetCastShadows(false);
+	Light->SetVisibility(false);
+	Light->RegisterComponent();
+	AddInstanceComponent(Light);
+	L.Light = Light;
+	NavLights.Add(L);
+}
+
+void AShipActor::SetNight(bool bNight)
+{
+	for (FShipNavLight& L : NavLights)
+	{
+		if (L.Light)
+		{
+			L.Light->SetVisibility(bNight);
+		}
+	}
 }
 
 bool AShipActor::BuildFromSpec(const TSharedPtr<FJsonObject>& Ship)
@@ -143,10 +226,23 @@ bool AShipActor::BuildFromSpec(const TSharedPtr<FJsonObject>& Ship)
 #endif
 	const TSharedPtr<FJsonObject>* MaterialsPtr = nullptr;
 	const TSharedPtr<FJsonObject> Materials = Ship->TryGetObjectField(TEXT("materials"), MaterialsPtr) ? *MaterialsPtr : nullptr;
+	TMap<FString, TSharedPtr<FJsonObject>> NavSpecs;
+	const TArray<TSharedPtr<FJsonValue>>* NavArray = nullptr;
+	if (Ship->TryGetArrayField(TEXT("nav_lights"), NavArray))
+	{
+		for (const TSharedPtr<FJsonValue>& V : *NavArray)
+		{
+			NavSpecs.Add(V->AsObject()->GetStringField(TEXT("node")), V->AsObject());
+		}
+	}
 	for (const TSharedPtr<FJsonValue>& V : Ship->GetArrayField(TEXT("parts")))
 	{
 		const TSharedPtr<FJsonObject> P = V->AsObject();
-		AddPart(RootComponent, P, JsonVec3(P, TEXT("origin")), Materials);
+		UStaticMeshComponent* C = AddPart(RootComponent, P, JsonVec3(P, TEXT("origin")), Materials);
+		if (const TSharedPtr<FJsonObject>* Nav = NavSpecs.Find(P->GetStringField(TEXT("node"))); Nav && C)
+		{
+			AddNavLight(C, *Nav, Materials);
+		}
 	}
 	for (const TSharedPtr<FJsonValue>& V : Ship->GetArrayField(TEXT("joints")))
 	{
@@ -166,8 +262,8 @@ bool AShipActor::BuildFromSpec(const TSharedPtr<FJsonObject>& Ship)
 		Joint.Pivot = Pivot;
 		Joints.Add(Joint);
 	}
-	UE_LOG(LogShipActor, Log, TEXT("SHIP_MODEL %s (%s): %d glb meshes, %d placeholder boxes, %d joints, %d materials, max bounds err %.2e m"),
-		*Robot, *Model, MeshParts, BoxParts, Joints.Num(), Paints.Num(), MaxBoundsErr);
+	UE_LOG(LogShipActor, Log, TEXT("SHIP_MODEL %s (%s): %d glb meshes, %d placeholder boxes, %d joints, %d materials, %d nav lights, max bounds err %.2e m"),
+		*Robot, *Model, MeshParts, BoxParts, Joints.Num(), Paints.Num(), NavLights.Num(), MaxBoundsErr);
 	return true;
 }
 

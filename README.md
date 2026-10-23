@@ -91,6 +91,28 @@ pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 実物理�
   ★ `ship_plant` は全船の `pos` を書いてから時刻つきの `joint_states` を書く。`pos` に時刻が無いので、`pos` → 時刻 →（時刻が届いたら）もう一度 `pos` の順に読む。
 * `-ShipFrameLog=<csv>`：フレームごとの壁時計・物理時刻・表示時刻（カクつきの調査用）。
 
+## 太陽光のまぶしさ・夜・航海灯（Step 5）
+
+```powershell
+pwsh scripts\windows\ship_scene.ps1 -Smoke -Shot -TowardLight      # 昼：太陽の方を向いて撮る（太陽の円盤・ブルーム・レンズフレア）
+pwsh scripts\windows\ship_scene.ps1 -Smoke -Shot -Night            # 夜：月・星・航海灯。航海灯の射光範囲を確かめる（HAKONIWA_UNREAL_SHIP_NAVLIGHT_OK）
+pwsh -Command "& .\scripts\windows\run_plant_test.ps1 -Screenshot -ExtraArgs @('-ShipNight')"   # 夜の結合テスト
+```
+
+* `AShipLighting`（場面に 1 つ）が昼と夜を切り替える（`-ShipNight`。場面の時刻は PDU に無いので起動の引数で選ぶ）。
+  * 昼：パノラマの太陽（約 9 万 lx）、空に太陽の円盤（視半径 0.265°、ブルームとレンズフレアでまぶしさ）、露出 EV100 15.5。
+  * 夜：満月（0.25 lx、青みの光）、空はパノラマを暗く青くしたもの（月夜の空 約 0.03 cd/m²）と星・月の円盤、霧も暗く、露出 EV100 0.5。
+  * `-ShipExposure=<EV100>` で露出を上書き（調整用）。
+* **航海灯**：灯の色・射光範囲・視認距離は船舶生成器の出力（`../../images/image2sim-framework/output/<model>/resolved_config.json`、物理 `ship_plant` と同じ元）から
+  `tools/gen_fleet_config.py` が `fleet_ue.json` の `nav_lights` にする。射光範囲の中心は COLREG 第 21 条（マスト灯 正船首 225°、舷灯 正船首から正横後 22.5° まで 112.5°、
+  船尾灯 正船尾 135°、全周灯 360°）、光度は附属書 I の式（6 海里 94 cd、3 海里 12 cd、2 海里 4.3 cd、1 海里 0.86 cd）。
+  * 灯ごとに材質を分け、視点の方位が射光範囲の外なら発光しない（`M_ShipPaint` の `SectorCenter` / `SectorHalf`、式は `ShipOceanShader.h`）。灯の輝度 = 光度 / 灯の見かけの面積。
+  * 夜は光源も点ける（射光範囲 160° 以下はスポット、ほかは点光源。光度 [cd]、影なし）。
+  * 検証（`-ShipNavLightCheck`）：各灯を周り 36 方位から 10 m で撮り、範囲の内（端から 3° 以上内側）は最大の 30 % 以上で色が合い、外は 2 % 以下（4 隻 18 灯・616 方位）。
+    近くの灯の光源に照らされた灯の胴を数えないよう、撮る間は光源を消す。左右の取り違え（方位の符号）を入れると FAIL になることを確かめた。
+* ★ 動的な材質のインスタンスは動的なインスタンスを親にできない（灯の材質は元の材質から作り、値を入れ直す）。
+* 遠くの船（数 km）の灯は画素より小さく、ほとんど見えない（残り）。
+
 ## 場面（Step 1）
 
 | 要素 | 中身 |
@@ -105,6 +127,7 @@ pwsh scripts\windows\run_plant_test.ps1 -CheckSec 60 -Screenshot   # 実物理�
 1. ~~Step 2：`AShipActor` に船の姿勢（D14・D18）と関節（`joint_states`）を反映する~~（済）
 2. ~~Step 3：海面を D4 の Gerstner 波で描く（時刻は D19）~~（済）
 3. ~~Step 4：新しい glb（塗装・上部構造物つき）を取り込み、Godot 側と見た目をそろえる~~（済）
+4. ~~Step 5：太陽光のまぶしさ・夜・航海灯~~（済）。残り：遠くの灯の見え方（画素より小さい灯）、SHP-25（船載カメラの PDU 書き戻し・ブリッジ視界）
 
 ## ライセンス
 

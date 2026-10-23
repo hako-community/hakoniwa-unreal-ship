@@ -14,6 +14,9 @@
 //   -ShipSampleInterval=<秒>  書く間隔（物理時刻、既定 0.5）
 //   -ShipChase                自船を後ろから追うカメラで見る（-ShipShot のときも）
 //   -ShipShot=<png>           -ShipSyncCheck の終わりに画面を撮ってから終わる（目視確認用。画面の警告の文字も写る）
+//   -ShipChaseToward=light    追うカメラを太陽（夜は月）の方へ向ける（まぶしさ・照り返しの確認、Step 5）
+//   -ShipNavLightCheck        夜（-ShipNight）に、各船の航海灯を周り 36 方位から撮り、射光範囲（COLREG 第 21 条）の内だけ光るかを確かめる
+//                             （HAKONIWA_UNREAL_SHIP_NAVLIGHT_OK / _FAILED。始まって 60 フレーム後に 1 回）
 //   -ShipFrameLog=<csv>       フレームごとの壁時計・物理時刻・表示時刻（カクつきの調査用。-ShipSyncCheck の終わりに書く）
 //
 // 表示時刻（Step 3）：物理は 50 Hz、描画は 130〜200 FPS。受信した値をそのまま描くと 2〜4 フレームごとに飛んでカクつくので、
@@ -35,6 +38,7 @@
 #include "ShipFleet.generated.h"
 
 class AShipActor;
+class AShipLighting;
 class AShipOcean;
 class UCameraComponent;
 class UPduManager;
@@ -131,6 +135,7 @@ private:
 	void LogStatus(double PhysicsTime);
 	void FinishCheck(double PhysicsTime);
 	void UpdateChase(float DeltaSeconds);
+	void CheckNavLights();
 
 	FString AssetName = TEXT("UnrealShipViewer");
 	FString ClockRobot;
@@ -196,9 +201,13 @@ private:
 	FString FrameLogPath;          // -ShipFrameLog=<csv>：フレームごとの壁時計・物理時刻（カクつきの調査用）
 	TArray<FString> FrameLines;
 	bool bChase = false;
+	bool bChaseTowardLight = false;
+	bool bNavLightCheck = false;
+	int32 NavLightCheckFrames = 0;
 	int32 ExitCountdown = -1;
 	int32 ExitCode = 0;
 
 	UPROPERTY() TObjectPtr<UCameraComponent> ChaseCam;
 	UPROPERTY() TObjectPtr<AShipOcean> Ocean;
+	UPROPERTY() TObjectPtr<AShipLighting> Lighting;
 };

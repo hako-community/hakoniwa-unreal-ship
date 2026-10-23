@@ -3,6 +3,8 @@
 #   pwsh scripts\windows\ship_scene.ps1 -Build            # /Game/Ship/Levels/ShipSea を作り直す（clone の後に必須。エディタが自動で開いて閉じる）
 #   pwsh scripts\windows\ship_scene.ps1 -Smoke            # -game で開き、数秒描いて HAKONIWA_UNREAL_SHIP_BOOT_OK を確認する
 #                                                         # （波面の計算と Godot の参照値の一致、描いた海面の高さも確かめる。-Shot で撮影）
+#   pwsh scripts\windows\ship_scene.ps1 -Smoke -Night     # 夜（月・星・航海灯）。航海灯の射光範囲を 36 方位から確かめる（HAKONIWA_UNREAL_SHIP_NAVLIGHT_OK）
+#   pwsh scripts\windows\ship_scene.ps1 -Smoke -Shot -TowardLight   # 太陽（夜は月）の方を向いて撮る（まぶしさ・照り返し）
 #   pwsh scripts\windows\ship_scene.ps1 -Smoke -NullRhi   # 描画なし（GPU の無い CI 用）
 #   pwsh scripts\windows\ship_scene.ps1 -Open             # エディタで開く
 #
@@ -12,7 +14,9 @@ param(
     [switch]$Build,
     [switch]$Smoke,
     [switch]$NullRhi,
-    [switch]$Shot,                # -Smoke の終わりに自船を追うカメラで撮る（Saved\ShipLogs\smoke_<時刻>.png）
+    [switch]$Shot,
+    [switch]$Night,               # 夜の場面（-ShipNight）と航海灯の確かめ（-ShipNavLightCheck）
+    [switch]$TowardLight,         # 撮るカメラを太陽（夜は月）の方へ向ける                # -Smoke の終わりに自船を追うカメラで撮る（Saved\ShipLogs\smoke_<時刻>.png）
     [switch]$Open,
     [double]$SmokeSec = 5.0,
     [string]$EngineRoot = (Join-Path $env:ProgramFiles 'Epic Games\UE_5.8'),
@@ -50,7 +54,9 @@ if ($Smoke) {
         "-ShipWaveParity=$parityRef")
     if ($NullRhi) { $gameArgs += '-nullrhi' } else { $gameArgs += '-ShipSurfaceCheck' }
     if ($Shot) { $gameArgs += @('-ShipChase', "-ShipShot=$(Join-Path $logDir "smoke_$stamp.png")") }
-    Invoke-Editor $gameArgs $log 'LogShipView|LogHakoniwa|LogShipOcean|SHIP_MODEL|Error'
+    if ($TowardLight) { $gameArgs += '-ShipChaseToward=light' }
+    if ($Night) { $gameArgs += @('-ShipNight', '-ShipNavLightCheck') }
+    Invoke-Editor $gameArgs $log 'LogShipView|LogHakoniwa|LogShipOcean|SHIP_MODEL|SHIP_NAVLIGHT|LogShipLighting|Error'
     $ok = Select-String -Path $log -Pattern 'HAKONIWA_UNREAL_SHIP_BOOT_OK' | Select-Object -First 1
     if (-not $ok) { throw "起動の確認に失敗しました（$log）" }
     if (-not (Select-String -Path $log -Pattern 'HAKONIWA_UNREAL_SHIP_WAVE_PARITY_OK' -Quiet)) { throw "波面の計算が参照値と一致しません（$log）" }
@@ -59,6 +65,11 @@ if ($Smoke) {
     $badModels = @($models | Where-Object { [int]$_.Matches[0].Groups[3].Value -gt 0 -or [int]$_.Matches[0].Groups[2].Value -eq 0 -or [double]$_.Matches[0].Groups[4].Value -gt 1e-3 })
     if ($models.Count -eq 0 -or $badModels.Count -gt 0) { throw "船の形が glb と一致しません（$log）" }
     Write-Host "[ship_scene] ship models: $($models.Count) OK"
+    if ($Night) {
+        $nav = Select-String -Path $log -Pattern 'HAKONIWA_UNREAL_SHIP_NAVLIGHT_(OK|FAILED).*' | Select-Object -Last 1
+        if (-not $nav -or $nav.Matches[0].Groups[1].Value -ne 'OK') { throw "航海灯の射光範囲が COLREG と一致しません（$log）" }
+        Write-Host "[ship_scene] $($nav.Matches[0].Value)"
+    }
     if (-not $NullRhi) {
         # 各回の検証（SHIP_SEA surface check <n>: ... misses <m>, max err <e> m）がすべて許容内か
         $checks = @(Select-String -Path $log -Pattern 'SHIP_SEA surface check \d+:.*misses (\d+), max err ([0-9.e+-]+) m')

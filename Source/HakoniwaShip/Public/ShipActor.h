@@ -5,6 +5,8 @@
 // Step 4：部品は glb から場面づくりが作った StaticMesh（/Game/Ship/Generated/Ships/<model>/SM_<node>）を置き、
 // 材質の差し込み口（glb の材質名）に fleet_ue.json の materials の色などを入れる（Godot と同じ見た目）。
 // メッシュの外形を fleet_ue.json の外形の箱と比べる（MaxBoundsErr。座標の移しの確かめ）。メッシュが無ければ外形の箱を仮の形として置く。
+// Step 5：航海灯（fleet_ue.json の nav_lights）は灯ごとに材質を分け、射光範囲（COLREG 第 21 条）の外からは発光が見えない。
+// 灯の輝度 = 光度 [cd]（附属書 I の視認距離から）/ 灯の見かけの面積。夜（SetNight）は光源（射光範囲 160° 以下はスポット、ほかは点光源）も点ける。
 // 座標：アクタ = 船体の原点（MJCF の vessel・glb のルート）。FLU → Unreal は ShipFrame。
 
 #pragma once
@@ -26,6 +28,20 @@ struct FShipJoint
 	UPROPERTY(VisibleAnywhere) FVector AxisFlu = FVector::UnitZ();
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> Pivot;
 	double LastQ = 0.0;
+};
+
+USTRUCT()
+struct FShipNavLight
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere) FString Node;
+	UPROPERTY(VisibleAnywhere) FString Color;          // white / red / green
+	UPROPERTY(VisibleAnywhere) double CenterDeg = 0.0; // 射光範囲の中心（船首から右回り）
+	UPROPERTY(VisibleAnywhere) double ArcDeg = 360.0;
+	UPROPERTY(VisibleAnywhere) double IntensityCd = 0.0;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Lamp;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<class ULocalLightComponent> Light;
 };
 
 UCLASS()
@@ -60,10 +76,15 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Ship") int32 BoxParts = 0;
 	double MaxBoundsErr = 0.0;
 
+	UPROPERTY(VisibleAnywhere, Category = "Ship") TArray<FShipNavLight> NavLights;
+	/** 夜は航海灯の光源を点ける（灯の発光は昼も同じ。昼は露出が高いので見えにくい） */
+	void SetNight(bool bNight);
+
 private:
 	UStaticMeshComponent* AddBox(USceneComponent* Parent, const FString& Name, const FVector& MinFlu, const FVector& MaxFlu, const FLinearColor& Color);
 	/** 部品を置く。OriginFlu は親（船体または関節の原点）からの部品の原点（外形の箱は親の座標） */
-	void AddPart(USceneComponent* Parent, const TSharedPtr<FJsonObject>& Part, const FVector& OriginFlu, const TSharedPtr<FJsonObject>& Materials);
+	UStaticMeshComponent* AddPart(USceneComponent* Parent, const TSharedPtr<FJsonObject>& Part, const FVector& OriginFlu, const TSharedPtr<FJsonObject>& Materials);
+	void AddNavLight(UStaticMeshComponent* Lamp, const TSharedPtr<FJsonObject>& Spec, const TSharedPtr<FJsonObject>& Materials);
 	UMaterialInterface* Paint(const FString& Slot, UMaterialInterface* Parent, const TSharedPtr<FJsonObject>& Materials);
 
 	UPROPERTY() TObjectPtr<UMaterialInterface> BaseMaterial;

@@ -4,7 +4,6 @@
 // コマンドライン（-game のとき）:
 //   -ShipSmoke=<秒>   起動の確認。指定秒だけ描いたあと、フレーム数と fps を
 //                     「HAKONIWA_UNREAL_SHIP_BOOT_OK frames=<n> fps=<f>」としてログに書いて終わる（scripts\windows\ship_scene.ps1 -Smoke）
-//   -ShipExposure=<EV100>  露出の上書き（調整用。既定は場面の DaylightExposure）
 //   -ShipShot=<png>   -ShipSmoke の終わりに画面を撮ってから終わる（箱庭につながないとき。つなぐときは AShipFleet が撮る）
 
 #pragma once

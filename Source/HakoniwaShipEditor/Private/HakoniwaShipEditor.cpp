@@ -36,7 +36,9 @@
 #include "HAL/PlatformMisc.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionCameraPositionWS.h"
 #include "Materials/MaterialExpressionCameraVectorWS.h"
+#include "Materials/MaterialExpressionTransform.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionCustom.h"
@@ -58,6 +60,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "ShipFleet.h"
 #include "ShipFrame.h"
+#include "ShipLighting.h"
 #include "ShipOcean.h"
 #include "ShipOceanShader.h"
 #include "ShipModelImport.h"
@@ -265,7 +268,22 @@ namespace
 		auto* Mul = Add<UMaterialExpressionMultiply>(M, -500, 300);
 		Mul->A.Connect(0, Vector(M, TEXT("Emissive"), FLinearColor::Black, 300));
 		Mul->B.Connect(0, Scalar(M, TEXT("EmissiveNits"), 1000.0f, 400));
-		UMaterialEditingLibrary::ConnectMaterialProperty(Mul, FString(), MP_EmissiveColor);
+		// 航海灯の射光範囲（Step 5）：灯火から視点への向きを部品の座標に移し、方位が範囲の外なら発光しない（既定 Half = 180 は全周）
+		auto* CamPos = Add<UMaterialExpressionCameraPositionWS>(M, -1300, 500);
+		auto* ObjPos = Add<UMaterialExpressionObjectPositionWS>(M, -1300, 600);
+		auto* ToCam = Add<UMaterialExpressionSubtract>(M, -1100, 550);
+		ToCam->A.Connect(0, CamPos);
+		ToCam->B.Connect(0, ObjPos);
+		auto* Local = Add<UMaterialExpressionTransform>(M, -900, 550);
+		Local->TransformSourceType = TRANSFORMSOURCE_World;
+		Local->TransformType = TRANSFORM_Local;
+		Local->Input.Connect(0, ToCam);
+		auto* Sector = Custom(M, TEXT("ShipNavSector"), ShipOceanShader::NavSectorCode(), CMOT_Float1,
+			{ { TEXT("Local"), Local }, { TEXT("Center"), Scalar(M, TEXT("SectorCenter"), 0.0f, 700) }, { TEXT("Half"), Scalar(M, TEXT("SectorHalf"), 180.0f, 800) } }, -600, 550);
+		auto* Lit = Add<UMaterialExpressionMultiply>(M, -300, 400);
+		Lit->A.Connect(0, Mul);
+		Lit->B.Connect(0, Sector);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Lit, FString(), MP_EmissiveColor);
 		return Finish(M) ? M : nullptr;
 	}
 
@@ -322,10 +340,18 @@ namespace
 		auto* Zero = Add<UMaterialExpressionConstant>(M, -600, 150);
 		Zero->R = 0.0f;
 		Sample->MipValue.Connect(0, Zero);
-		auto* Mul = Add<UMaterialExpressionMultiply>(M, -100, 0);
-		Mul->A.Connect(0, Sample);
-		Mul->B.Connect(0, Scalar(M, TEXT("SkyNits"), SkyNitsPerUnit, 200));
-		UMaterialEditingLibrary::ConnectMaterialProperty(Mul, FString(), MP_EmissiveColor);
+		// 昼夜（Step 5）：AShipLighting がパラメータを入れる（太陽・月の円盤、夜の暗さと青み、星）
+		auto* Rgb = Mask(M, Sample, true, true, true, false, -200, 0);
+		auto* Color = Custom(M, TEXT("ShipSkyColor"), ShipOceanShader::SkyColorCode(), CMOT_Float3,
+			{ { TEXT("Col"), Rgb }, { TEXT("CamVec"), Cam },
+			  { TEXT("SkyNits"), Scalar(M, TEXT("SkyNits"), SkyNitsPerUnit, 200) },
+			  { TEXT("Tint"), Vector(M, TEXT("Tint"), FLinearColor::White, 300) },
+			  { TEXT("DiskDir"), Vector(M, TEXT("DiskDir"), FLinearColor(0.0f, 0.0f, 1.0f), 400) },
+			  { TEXT("DiskCos"), Scalar(M, TEXT("DiskCos"), 0.99998930f, 500) },
+			  { TEXT("DiskNits"), Scalar(M, TEXT("DiskNits"), 0.0f, 600) },
+			  { TEXT("DiskColor"), Vector(M, TEXT("DiskColor"), FLinearColor::White, 700) },
+			  { TEXT("Stars"), Scalar(M, TEXT("Stars"), 0.0f, 800) } }, -100, 0);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Color, FString(), MP_EmissiveColor);
 		return Finish(M) ? M : nullptr;
 	}
 
@@ -404,6 +430,14 @@ namespace
 		SkyLightC->bRealTimeCapture = true;   // 空の球（bIsSky の材質）を取り込む
 		SkyLightC->bLowerHemisphereIsBlack = false;   // パノラマの下半分（空の映り込み）も使う。波で下向きに反射した光が黒くならない
 
+		// 月（Step 5、夜だけ点く。AShipLighting が向き・照度を入れる）
+		ADirectionalLight* Moon = World->SpawnActor<ADirectionalLight>();
+		Moon->SetActorLabel(TEXT("Moon"));
+		UDirectionalLightComponent* MoonC = CastChecked<UDirectionalLightComponent>(Moon->GetLightComponent());
+		MoonC->SetMobility(EComponentMobility::Movable);
+		MoonC->SetIntensity(0.0f);
+		MoonC->SetVisibility(false);
+
 		// 霧：水平線の空の色
 		const FVector Horizon = JsonVec(SkyInfo, TEXT("horizon_rgb")) * SkyNitsPerUnit;
 		AExponentialHeightFog* Fog = World->SpawnActor<AExponentialHeightFog>();
@@ -423,6 +457,27 @@ namespace
 		Post->Settings.bOverride_AutoExposureMaxBrightness = true;
 		Post->Settings.AutoExposureMinBrightness = DaylightEV100;
 		Post->Settings.AutoExposureMaxBrightness = DaylightEV100;
+		// 太陽光のまぶしさ（Step 5）：太陽の円盤と海面の照り返しのにじみ（ブルーム）とレンズフレア
+		Post->Settings.bOverride_BloomIntensity = true;
+		Post->Settings.BloomIntensity = 0.8f;
+		Post->Settings.bOverride_LensFlareIntensity = true;
+		Post->Settings.LensFlareIntensity = 0.5f;
+
+		// 昼と夜（Step 5）：-ShipNight で夜。部品と値を渡しておき、実行時に AShipLighting が切り替える
+		AShipLighting* Lighting = World->SpawnActor<AShipLighting>();
+		Lighting->SetActorLabel(TEXT("ShipLighting"));
+		Lighting->Sun = Sun;
+		Lighting->Moon = Moon;
+		Lighting->SkyLight = SkyLight;
+		Lighting->SkySphere = SkySphere;
+		Lighting->Fog = Fog;
+		Lighting->Post = Post;
+		Lighting->SunDirEnu = SunEnu;
+		Lighting->SunLux = SunLux;
+		Lighting->SunColor = FLinearColor(SunRgb.X, SunRgb.Y, SunRgb.Z);
+		Lighting->SkyNits = SkyNitsPerUnit;
+		Lighting->FogColor = FLinearColor(Horizon.X, Horizon.Y, Horizon.Z);
+		Lighting->DayEV100 = DaylightEV100;
 
 		// 海面（Step 3）
 		AShipOcean* Ocean = World->SpawnActor<AShipOcean>();

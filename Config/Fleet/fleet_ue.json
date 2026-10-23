@@ -821,6 +821,40 @@
           ]
         }
       },
+      "nav_lights": [
+        {
+          "node": "navlight_masthead_light",
+          "color": "white",
+          "arc_deg": 225.0,
+          "center_deg": 0.0,
+          "range_nm": 6.0,
+          "intensity_cd": 94.208
+        },
+        {
+          "node": "navlight_port_light",
+          "color": "red",
+          "arc_deg": 112.5,
+          "center_deg": -56.25,
+          "range_nm": 3.0,
+          "intensity_cd": 12.059
+        },
+        {
+          "node": "navlight_starboard_light",
+          "color": "green",
+          "arc_deg": 112.5,
+          "center_deg": 56.25,
+          "range_nm": 3.0,
+          "intensity_cd": 12.059
+        },
+        {
+          "node": "navlight_stern_light",
+          "color": "white",
+          "arc_deg": 135.0,
+          "center_deg": 180.0,
+          "range_nm": 3.0,
+          "intensity_cd": 12.059
+        }
+      ],
       "ais": {
         "has_ais": true,
         "mmsi": 431000001,
@@ -1551,6 +1585,40 @@
           ]
         }
       },
+      "nav_lights": [
+        {
+          "node": "navlight_masthead_light",
+          "color": "white",
+          "arc_deg": 225.0,
+          "center_deg": 0.0,
+          "range_nm": 6.0,
+          "intensity_cd": 94.208
+        },
+        {
+          "node": "navlight_port_light",
+          "color": "red",
+          "arc_deg": 112.5,
+          "center_deg": -56.25,
+          "range_nm": 3.0,
+          "intensity_cd": 12.059
+        },
+        {
+          "node": "navlight_starboard_light",
+          "color": "green",
+          "arc_deg": 112.5,
+          "center_deg": 56.25,
+          "range_nm": 3.0,
+          "intensity_cd": 12.059
+        },
+        {
+          "node": "navlight_stern_light",
+          "color": "white",
+          "arc_deg": 135.0,
+          "center_deg": 180.0,
+          "range_nm": 3.0,
+          "intensity_cd": 12.059
+        }
+      ],
       "ais": {
         "has_ais": true,
         "mmsi": 431000002,
@@ -2192,6 +2260,40 @@
           ]
         }
       },
+      "nav_lights": [
+        {
+          "node": "navlight_masthead_light",
+          "color": "white",
+          "arc_deg": 225.0,
+          "center_deg": 0.0,
+          "range_nm": 6.0,
+          "intensity_cd": 94.208
+        },
+        {
+          "node": "navlight_port_light",
+          "color": "red",
+          "arc_deg": 112.5,
+          "center_deg": -56.25,
+          "range_nm": 3.0,
+          "intensity_cd": 12.059
+        },
+        {
+          "node": "navlight_starboard_light",
+          "color": "green",
+          "arc_deg": 112.5,
+          "center_deg": 56.25,
+          "range_nm": 3.0,
+          "intensity_cd": 12.059
+        },
+        {
+          "node": "navlight_stern_light",
+          "color": "white",
+          "arc_deg": 135.0,
+          "center_deg": 180.0,
+          "range_nm": 3.0,
+          "intensity_cd": 12.059
+        }
+      ],
       "ais": {
         "has_ais": true,
         "mmsi": 431000003,
@@ -2738,6 +2840,56 @@
           ]
         }
       },
+      "nav_lights": [
+        {
+          "node": "navlight_masthead_light",
+          "color": "white",
+          "arc_deg": 225.0,
+          "center_deg": 0.0,
+          "range_nm": 2.0,
+          "intensity_cd": 4.287
+        },
+        {
+          "node": "navlight_port_light",
+          "color": "red",
+          "arc_deg": 112.5,
+          "center_deg": -56.25,
+          "range_nm": 1.0,
+          "intensity_cd": 0.857
+        },
+        {
+          "node": "navlight_starboard_light",
+          "color": "green",
+          "arc_deg": 112.5,
+          "center_deg": 56.25,
+          "range_nm": 1.0,
+          "intensity_cd": 0.857
+        },
+        {
+          "node": "navlight_stern_light",
+          "color": "white",
+          "arc_deg": 135.0,
+          "center_deg": 180.0,
+          "range_nm": 2.0,
+          "intensity_cd": 4.287
+        },
+        {
+          "node": "navlight_fishing_light_top",
+          "color": "red",
+          "arc_deg": 360.0,
+          "center_deg": 0.0,
+          "range_nm": 2.0,
+          "intensity_cd": 4.287
+        },
+        {
+          "node": "navlight_fishing_light_bottom",
+          "color": "white",
+          "arc_deg": 360.0,
+          "center_deg": 0.0,
+          "range_nm": 2.0,
+          "intensity_cd": 4.287
+        }
+      ],
       "ais": {
         "has_ais": false
       }

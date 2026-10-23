@@ -89,6 +89,39 @@ return float4(normalize(float3(-slope.x, slope.y, 1.0)), eta);
 		return TEXT("return lerp(Base, 0.35, smoothstep(300.0, 5000.0, Depth * 0.01));");
 	}
 
+	/** 航海灯の射光範囲（Step 5）：Local = 灯火から視点への向き（部品の座標＝船体の座標、Unreal の X 前・Y 右）。
+	 *  方位 = 船首から右回り [deg]。Center ± Half の内側で 1（端は ±0.5° で落とす）。Half >= 180 は全周。COLREG 第 21 条の射光範囲 */
+	inline const TCHAR* NavSectorCode()
+	{
+		return TEXT(R"(
+if (Half >= 180.0) { return 1.0; }
+float b = degrees(atan2(Local.y, Local.x));
+float d = abs(fmod(b - Center + 540.0, 360.0) - 180.0);
+return saturate(Half + 0.5 - d);
+)");
+	}
+
+	/** 空（Step 5）：Col = パノラマの色。昼は太陽、夜は月の円盤（DiskDir は Unreal の向き、DiskCos = cos(視半径)）と、夜の星（Stars > 0）。
+	 *  返り値は輝度 [cd/m²]（SkyNits・Tint を掛けたパノラマ＋円盤＋星） */
+	inline const TCHAR* SkyColorCode()
+	{
+		return TEXT(R"(
+float3 v = -normalize(CamVec);
+float3 sky = Col * SkyNits * Tint;
+float c = dot(v, normalize(DiskDir));
+float disk = smoothstep(DiskCos - 4e-6, DiskCos + 4e-6, c);
+float3 stars = 0;
+if (Stars > 0.0 && v.z > 0.02)
+{
+	float3 g = floor(v * 900.0);
+	float h = frac(sin(dot(g, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+	float k = frac(h * 7.31);
+	stars = (h > 0.9975 ? (0.2 + 0.8 * k * k) : 0.0) * Stars * smoothstep(0.02, 0.15, v.z);
+}
+return sky + disk * DiskNits * DiskColor + stars;
+)");
+	}
+
 	/** 外側の平面：波面メッシュと重なる内側（半径 Hole [m]）は描かない（OpacityMask） */
 	inline const TCHAR* FarMaskCode()
 	{

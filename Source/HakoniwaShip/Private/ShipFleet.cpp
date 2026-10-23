@@ -24,7 +24,11 @@
 #include "Serialization/JsonSerializer.h"
 #include "ShipActor.h"
 #include "ShipFrame.h"
+#include "ShipLighting.h"
 #include "ShipOcean.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "TextureResource.h"
 #include "EngineUtils.h"
 #include "UnrealClient.h"
 
@@ -197,6 +201,9 @@ void AShipFleet::BeginPlay()
 	FParse::Value(Cmd, TEXT("-ShipShot="), ShotPath);
 	FParse::Value(Cmd, TEXT("-ShipFrameLog="), FrameLogPath);
 	bChase = FParse::Param(Cmd, TEXT("ShipChase")) || !ShotPath.IsEmpty();
+	FString Toward;
+	bChaseTowardLight = FParse::Value(Cmd, TEXT("-ShipChaseToward="), Toward) && Toward == TEXT("light");
+	bNavLightCheck = FParse::Param(Cmd, TEXT("ShipNavLightCheck"));
 	if (!LoadFleet())
 	{
 		if (CheckSec > 0.0)
@@ -226,6 +233,19 @@ void AShipFleet::BeginPlay()
 	else
 	{
 		UE_LOG(LogShipFleet, Warning, TEXT("no AShipOcean in the map (run scripts\\windows\\ship_scene.ps1 -Build)"));
+	}
+	// 昼夜（Step 5）：夜なら航海灯の光源を点ける
+	for (TActorIterator<AShipLighting> It(GetWorld()); It; ++It)
+	{
+		Lighting = *It;
+		break;
+	}
+	if (Lighting)
+	{
+		for (AShipActor* Ship : Ships)
+		{
+			Ship->SetNight(Lighting->IsNight());
+		}
 	}
 	if (bSync && !FindPduManager())
 	{
@@ -741,6 +761,124 @@ void AShipFleet::FinishCheck(double PhysicsTime)
 	ExitCountdown = 30;
 }
 
+void AShipFleet::CheckNavLights()
+{
+	// 各灯を、灯の高さで周り 36 方位（船首から右回り 10° おき）・10 m から、その灯だけを写して撮る（HDR の色）。
+	// 射光範囲の内（端から 3° 以上内側）は、その灯の最大の明るさの 30 % 以上で色が合い、外（端から 3° 以上外側）は 2 % 以下であること
+	constexpr int32 Px = 32;
+	UTextureRenderTarget2D* Rt = NewObject<UTextureRenderTarget2D>(this);
+	Rt->RenderTargetFormat = RTF_RGBA32f;
+	Rt->ClearColor = FLinearColor::Black;
+	Rt->InitAutoFormat(Px, Px);
+	Rt->UpdateResourceImmediate(true);
+	USceneCaptureComponent2D* Cap = NewObject<USceneCaptureComponent2D>(this);
+	Cap->SetUsingAbsoluteLocation(true);
+	Cap->SetUsingAbsoluteRotation(true);
+	Cap->FOVAngle = 8.0f;
+	Cap->CaptureSource = ESceneCaptureSource::SCS_SceneColorHDR;
+	Cap->bCaptureEveryFrame = false;
+	Cap->bCaptureOnMovement = false;
+	Cap->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+	Cap->TextureTarget = Rt;
+	Cap->RegisterComponent();
+	TArray<FString> Problems;
+	int32 Lights = 0, Checked = 0;
+	// 確かめるのは灯そのものの発光の射光範囲。近くの灯の光源に照らされた灯の胴（漁船は灯が 1 m 内に集まる）を数えないよう、光源は消して撮る
+	for (AShipActor* Ship : Ships)
+	{
+		Ship->SetNight(false);
+	}
+	for (AShipActor* Ship : Ships)
+	{
+		const FVector F = FVector(Ship->GetActorForwardVector().X, Ship->GetActorForwardVector().Y, 0.0).GetSafeNormal();
+		const FVector R = FVector(Ship->GetActorRightVector().X, Ship->GetActorRightVector().Y, 0.0).GetSafeNormal();   // Unreal の右 = 右舷
+		for (const FShipNavLight& L : Ship->NavLights)
+		{
+			++Lights;
+			Cap->ShowOnlyComponents.Reset();
+			Cap->ShowOnlyComponents.Add(L.Lamp);
+			const FVector P = L.Lamp->Bounds.Origin;
+			TArray<double> Lum;
+			TArray<FLinearColor> Col;
+			for (int32 k = 0; k < 36; ++k)
+			{
+				const double B = FMath::DegreesToRadians(k * 10.0 - 180.0);
+				const FVector D = F * FMath::Cos(B) + R * FMath::Sin(B);
+				const FVector C = P + D * 1000.0;   // 灯（径 24 cm）が画素より大きく写る距離（8° / 32 画素で 1 画素 約 4 cm）
+				Cap->SetWorldLocationAndRotation(C, (-D).Rotation());
+				Cap->CaptureScene();
+				TArray<FLinearColor> Pix;
+				Rt->GameThread_GetRenderTargetResource()->ReadLinearColorPixels(Pix);
+				FLinearColor Best = FLinearColor::Black;
+				for (const FLinearColor& X : Pix)
+				{
+					if (X.R + X.G + X.B > Best.R + Best.G + Best.B) { Best = X; }
+				}
+				Lum.Add((Best.R + Best.G + Best.B) / 3.0);
+				Col.Add(Best);
+			}
+			const double Max = FMath::Max(Lum);
+			int32 In = 0, Out = 0;
+			for (int32 k = 0; k < 36; ++k)
+			{
+				const double Bear = k * 10.0 - 180.0;
+				const double Dev = FMath::Abs(FMath::Fmod(Bear - L.CenterDeg + 540.0, 360.0) - 180.0);
+				const double Half = L.ArcDeg * 0.5;
+				if (L.ArcDeg < 360.0 && FMath::Abs(Dev - Half) < 3.0)
+				{
+					continue;   // 範囲の端の近く
+				}
+				++Checked;
+				const bool bInside = L.ArcDeg >= 360.0 || Dev < Half;
+				const FLinearColor& X = Col[k];
+				if (bInside)
+				{
+					++In;
+					const bool bColor = L.Color == TEXT("red") ? (X.R > 2.0 * X.G && X.R > 2.0 * X.B)
+						: L.Color == TEXT("green") ? (X.G > 2.0 * X.R && X.G > X.B)
+						: (FMath::Min3(X.R, X.G, X.B) > 0.4 * FMath::Max3(X.R, X.G, X.B));
+					if (Lum[k] < 0.3 * Max || !bColor)
+					{
+						Problems.Add(FString::Printf(TEXT("%s/%s: not lit at bearing %.0f (lum %.3g of max %.3g, rgb %.3g %.3g %.3g)"),
+							*Ship->Robot, *L.Node, Bear, Lum[k], Max, X.R, X.G, X.B));
+					}
+				}
+				else
+				{
+					++Out;
+					if (Lum[k] > 0.02 * Max)
+					{
+						Problems.Add(FString::Printf(TEXT("%s/%s: visible outside its arc at bearing %.0f (lum %.3g of max %.3g)"),
+							*Ship->Robot, *L.Node, Bear, Lum[k], Max));
+					}
+				}
+			}
+			UE_LOG(LogShipFleet, Log, TEXT("SHIP_NAVLIGHT %s/%s %s %.1f deg arc at %.1f deg: max %.3g, inside %d, outside %d bearings"),
+				*Ship->Robot, *L.Node, *L.Color, L.ArcDeg, L.CenterDeg, Max, In, Out);
+			if (Max <= 0.0)
+			{
+				Problems.Add(FString::Printf(TEXT("%s/%s: never lit"), *Ship->Robot, *L.Node));
+			}
+		}
+	}
+	Cap->DestroyComponent();
+	for (AShipActor* Ship : Ships)
+	{
+		Ship->SetNight(AShipLighting::IsNight());
+	}
+	if (Lights == 0) { Problems.Add(TEXT("no nav lights")); }
+	if (Lighting && !Lighting->IsNight()) { Problems.Add(TEXT("not night (-ShipNight)")); }
+	if (Problems.Num() == 0)
+	{
+		UE_LOG(LogShipFleet, Display, TEXT("HAKONIWA_UNREAL_SHIP_NAVLIGHT_OK lights %d bearings %d"), Lights, Checked);
+	}
+	else
+	{
+		UE_LOG(LogShipFleet, Error, TEXT("HAKONIWA_UNREAL_SHIP_NAVLIGHT_FAILED %d problems: %s"), Problems.Num(),
+			*FString::Join(TArrayView<const FString>(Problems.GetData(), FMath::Min(Problems.Num(), 8)), TEXT("; ")));
+	}
+}
+
 void AShipFleet::UpdateChase(float DeltaSeconds)
 {
 	// 自船（最初の船）の後ろ 160 m・上 45 m から、船の少し上を見る。向きは方位だけ（揺れは追わない）でなめらかに
@@ -749,14 +887,27 @@ void AShipFleet::UpdateChase(float DeltaSeconds)
 		return;
 	}
 	const AShipActor* Own = Ships[0];
-	const FVector Fwd = FVector(Own->GetActorForwardVector().X, Own->GetActorForwardVector().Y, 0.0).GetSafeNormal();
+	FVector Fwd = FVector(Own->GetActorForwardVector().X, Own->GetActorForwardVector().Y, 0.0).GetSafeNormal();
+	if (bChaseTowardLight && Lighting)
+	{
+		// 太陽（夜は月）の方を見る：光源の水平の向きを前にする
+		const FVector D = Lighting->LightDirEnu();
+		Fwd = ShipFrame::LocalDirToUnreal(D.X, D.Y, 0.0);
+	}
 	const FVector Right = FVector::CrossProduct(FVector::UpVector, Fwd);
 	const FVector Target = Own->GetActorLocation() + FVector(0, 0, 800.0);
 	const FVector Want = Own->GetActorLocation() - Fwd * 16000.0 + Right * 6000.0 + FVector(0, 0, 4500.0);
 	const float A = 1.0f - FMath::Exp(-DeltaSeconds * 2.0f);
 	const FVector Now = ChaseCam->GetComponentLocation();
 	const FVector Pos = (Now - Want).Size() > 50000.0 ? Want : FMath::Lerp(Now, Want, A);
-	ChaseCam->SetWorldLocationAndRotation(Pos, (Target - Pos).Rotation());
+	FRotator Rot = (Target - Pos).Rotation();
+	if (bChaseTowardLight && Lighting)
+	{
+		// 光源（仰角が高い）が画面の上の方に入るよう、仰角の 10° 下を見る（まぶしさの確かめ。船は画面の下に外れることがある）
+		const FVector D = Lighting->LightDirEnu();
+		Rot.Pitch = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(D.Z, -1.0, 1.0))) - 10.0;
+	}
+	ChaseCam->SetWorldLocationAndRotation(Pos, Rot);
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0); PC && PC->GetViewTarget() != this)
 	{
 		PC->SetViewTarget(this);
@@ -769,6 +920,10 @@ void AShipFleet::Tick(float DeltaSeconds)
 	if (bChase)
 	{
 		UpdateChase(DeltaSeconds);
+	}
+	if (bNavLightCheck && ++NavLightCheckFrames == 60)
+	{
+		CheckNavLights();
 	}
 	if (ExitCountdown >= 0 && --ExitCountdown < 0)
 	{
