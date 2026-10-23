@@ -1,0 +1,20 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Hakoniwa PDU",
+	"Description": "Hakoniwa PDU communication plugin.",
+	"Category": "Hakoniwa",
+	"CreatedBy": "Hakoniwa",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "HakoniwaPdu",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

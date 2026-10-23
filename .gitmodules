@@ -1,0 +1,3 @@
+[submodule "Plugins/HakoniwaPdu/Source/ThirdParty/hakoniwa-pdu-registry"]
+	path = Plugins/HakoniwaPdu/Source/ThirdParty/hakoniwa-pdu-registry
+	url = https://github.com/hakoniwalab/hakoniwa-pdu-registry.git
