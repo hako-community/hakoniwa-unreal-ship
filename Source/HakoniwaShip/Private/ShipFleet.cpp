@@ -31,6 +31,7 @@
 #include "ShipLighting.h"
 #include "ShipOcean.h"
 #include "Components/SceneCaptureComponent2D.h"
+#include "Components/LocalLightComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "TextureResource.h"
 #include "EngineUtils.h"
@@ -46,6 +47,7 @@
 #undef hako_convert_cpp2pdu_array_string_varray
 #include "hako_msgs/pdu_cpptype_conv_Disturbance.hpp"
 #include "std_msgs/pdu_cpptype_conv_String.hpp"
+#include "sensor_msgs/pdu_cpptype_conv_PointCloud2.hpp"
 
 DEFINE_LOG_CATEGORY_STATIC(LogShipFleet, Log, All);
 
@@ -148,6 +150,15 @@ bool AShipFleet::LoadFleet()
 		{
 			return false;
 		}
+		// 海域の交通（SHP-28）の雛形：モデルごとの形と、向きを付ける前の外形の長さ
+		const FString Model = S->GetStringField(TEXT("model"));
+		if (!ModelSpecs.Contains(Model))
+		{
+			FVector Origin, Extent;
+			Ship->GetActorBounds(false, Origin, Extent);
+			ModelSpecs.Add(Model, S);
+			ModelLength.Add(Model, Extent.X * 2.0 / 100.0);
+		}
 		const TSharedPtr<FJsonObject> Preview = S->GetObjectField(TEXT("preview_pose"));
 		Ship->ApplyPose(JsonVec3(Preview, TEXT("linear")), JsonVec3(Preview, TEXT("angular")));
 		Ships.Add(Ship);
@@ -215,6 +226,12 @@ bool AShipFleet::LoadFleet()
 	const TSharedPtr<FJsonObject> Auto = Root->GetObjectField(TEXT("autonomy_status"));
 	AutonomyPdu = Auto->GetStringField(TEXT("pdu"));
 	Auto->TryGetStringField(TEXT("foc_pdu"), FocPdu);
+	const TSharedPtr<FJsonObject>* Tr = nullptr;
+	if (Root->TryGetObjectField(TEXT("traffic"), Tr))
+	{
+		TrafficRobot = (*Tr)->GetStringField(TEXT("robot"));
+		TrafficPdu = (*Tr)->GetStringField(TEXT("pdu"));
+	}
 	const TArray<TSharedPtr<FJsonValue>>& ShipSpecs = Root->GetArrayField(TEXT("ships"));
 	Sync.StableSort([&OwnRobot](const FShipSync& A, const FShipSync& B) { return A.Actor->Robot == OwnRobot && B.Actor->Robot != OwnRobot; });
 	for (const FShipSync& S : Sync)
@@ -1017,6 +1034,110 @@ void AShipFleet::CheckNavLights()
 	}
 }
 
+AShipActor* AShipFleet::SpawnTrafficShip(uint32 Mmsi, double LengthM)
+{
+	const FString Model = LengthM < 25.0 ? TEXT("fishing_boat") : (LengthM < 120.0 ? TEXT("container_749gt") : TEXT("container_700teu"));
+	const TSharedPtr<FJsonObject>* Spec = ModelSpecs.Find(Model);
+	if (!Spec && ModelSpecs.Num() > 0)
+	{
+		Spec = &ModelSpecs.CreateIterator().Value();
+	}
+	if (!Spec)
+	{
+		return nullptr;
+	}
+	TSharedPtr<FJsonObject> Copy = MakeShared<FJsonObject>(**Spec);
+	Copy->SetStringField(TEXT("robot"), FString::Printf(TEXT("Traffic_%u"), Mmsi));
+	AShipActor* Ship = GetWorld()->SpawnActor<AShipActor>();
+	if (!Ship || !Ship->BuildFromSpec(Copy))
+	{
+		return nullptr;
+	}
+	// 航海灯の光源は点けない（何十隻もの光源は重い。灯の発光の見た目は残る）
+	for (FShipNavLight& L : Ship->NavLights)
+	{
+		if (L.Light)
+		{
+			L.Light->SetVisibility(false);
+		}
+	}
+	const double* ModelL = ModelLength.Find(Model);
+	const double Scale = (ModelL && *ModelL > 1.0) ? LengthM / *ModelL : 1.0;
+	Ship->SetActorScale3D(FVector(Scale));
+	++TrafficSpawned;
+	return Ship;
+}
+
+void AShipFleet::ReadTraffic(UPduManager* Pdu)
+{
+	if (TrafficPdu.IsEmpty() || !Pdu->ReadPduRawData(TrafficRobot, TrafficPdu, Buf) || Buf.Num() == 0)
+	{
+		return;
+	}
+	HakoCpp_PointCloud2 Pc {};
+	hako::pdu::PduConvertor<HakoCpp_PointCloud2, hako::pdu::msgs::sensor_msgs::PointCloud2> Conv;
+	if (!Conv.pdu2cpp(reinterpret_cast<char*>(Buf.GetData()), Pc) || Pc.point_step < 32)
+	{
+		return;
+	}
+	++TrafficFrames;
+	const double Stamp = Pc.header.stamp.sec + Pc.header.stamp.nanosec * 1.0e-9;
+	const size_t N = Pc.data.size() / Pc.point_step;
+	for (size_t i = 0; i < N; ++i)
+	{
+		const uint8* P = reinterpret_cast<const uint8*>(Pc.data.data()) + i * Pc.point_step;
+		float F[6];
+		uint32 Mmsi = 0;
+		FMemory::Memcpy(F, P, 24);
+		FMemory::Memcpy(&Mmsi, P + 24, 4);
+		FTrafficShip* E = Traffic.Find(Mmsi);
+		if (!E)
+		{
+			FTrafficShip New;
+			New.Actor = SpawnTrafficShip(Mmsi, F[3]);
+			New.T0 = New.T1 = Stamp;
+			New.P0 = New.P1 = FVector2D(F[0], F[1]);
+			New.Yaw0 = New.Yaw1 = F[2];
+			E = &Traffic.Add(Mmsi, New);
+		}
+		else if (Stamp > E->T1)
+		{
+			E->T0 = E->T1; E->P0 = E->P1; E->Yaw0 = E->Yaw1;
+			E->T1 = Stamp; E->P1 = FVector2D(F[0], F[1]); E->Yaw1 = F[2];
+		}
+		E->LastSeen = Stamp;
+	}
+	// 3 s 見えない船（航跡の終わり・海域の外）は消す
+	for (auto It = Traffic.CreateIterator(); It; ++It)
+	{
+		if (It.Value().LastSeen < Stamp - 3.0)
+		{
+			if (AShipActor* A = It.Value().Actor.Get())
+			{
+				A->Destroy();
+			}
+			It.RemoveCurrent();
+		}
+	}
+}
+
+void AShipFleet::ApplyTraffic(double T)
+{
+	for (auto& Pair : Traffic)
+	{
+		FTrafficShip& E = Pair.Value;
+		AShipActor* A = E.Actor.Get();
+		if (!A)
+		{
+			continue;
+		}
+		const double Alpha = E.T1 > E.T0 ? FMath::Clamp((T - E.T0) / (E.T1 - E.T0), 0.0, 1.0) : 1.0;
+		const FVector2D P = FMath::Lerp(E.P0, E.P1, Alpha);
+		const double Yaw = E.Yaw0 + Alpha * FMath::UnwindRadians(E.Yaw1 - E.Yaw0);
+		A->ApplyPose(FVector(P.X, P.Y, 0.0), FVector(0.0, 0.0, Yaw));
+	}
+}
+
 void AShipFleet::SpawnQuay(const FString& Arg)
 {
 	// 岸壁の面は線分 p1→p2（物理の quay と同じ）。陸側へ幅 25 m・水面上 2 m・水面下 10 m のコンクリート、
@@ -1334,6 +1455,7 @@ void AShipFleet::Tick(float DeltaSeconds)
 		}
 	}
 	ReadDisturbance(Pdu);
+	ReadTraffic(Pdu);
 	if (!AutonomyPdu.IsEmpty() && Pdu->ReadPduRawData(ViewShips.Num() > 0 ? ViewShips[0].Robot : FString(), AutonomyPdu, Buf) && Buf.Num() > 0)
 	{
 		// std_msgs/String の JSON（D29）。読めない中身は数えるだけ
@@ -1413,6 +1535,7 @@ void AShipFleet::Tick(float DeltaSeconds)
 	{
 		ApplyAt(S, DisplayTime);
 	}
+	ApplyTraffic(DisplayTime);
 	// 船載カメラ（SHP-25）：船と海面が表示時刻で置かれたこのフレームを撮る（画像の時刻 = 表示時刻）。届いた画像を PDU に書く
 	for (UShipCamera* Cam : Cameras)
 	{

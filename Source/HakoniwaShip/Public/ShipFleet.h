@@ -197,6 +197,27 @@ private:
 	void TickShotViews();
 	void CheckNavLights();
 
+	// 海域の交通（SHP-28）：OwnShip/traffic（sensor_msgs/PointCloud2、1 点 = 1 隻、局所 ENU）を受け、MMSI ごとに船隊のモデルを
+	// 船長に合わせて縮尺して置く（25 m 未満は漁船、120 m 未満は 749GT、それ以上は 700TEU）。表示時刻で 2 つの標本の間を補間
+	struct FTrafficShip
+	{
+		TWeakObjectPtr<AShipActor> Actor;
+		double T0 = -1.0, T1 = -1.0;
+		FVector2D P0, P1;
+		double Yaw0 = 0.0, Yaw1 = 0.0;
+		double LastSeen = -1.0;
+	};
+	TMap<uint32, FTrafficShip> Traffic;
+	FString TrafficRobot;
+	FString TrafficPdu;
+	TMap<FString, TSharedPtr<FJsonObject>> ModelSpecs;   // model → fleet_ue.json の ships[] の形
+	TMap<FString, double> ModelLength;                   // model → 船体の外形の長さ [m]
+	int32 TrafficSpawned = 0;
+	int32 TrafficFrames = 0;
+	void ReadTraffic(UPduManager* Pdu);
+	void ApplyTraffic(double T);
+	AShipActor* SpawnTrafficShip(uint32 Mmsi, double LengthM);
+
 	FString AssetName = TEXT("UnrealShipViewer");
 	FString ClockRobot;
 	FString ClockPdu;

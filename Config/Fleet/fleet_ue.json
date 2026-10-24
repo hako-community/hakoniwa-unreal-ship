@@ -77,6 +77,10 @@
     "pdu": "autonomy_status",
     "foc_pdu": "foc_command"
   },
+  "traffic": {
+    "robot": "OwnShip",
+    "pdu": "traffic"
+  },
   "cameras": [
     {
       "robot": "OwnShip",
@@ -179,6 +183,13 @@
       "type": "std_msgs/String",
       "channel_id": 51,
       "pdu_size": 256
+    },
+    {
+      "robot": "OwnShip",
+      "pdu": "traffic",
+      "type": "sensor_msgs/PointCloud2",
+      "channel_id": 14,
+      "pdu_size": 16384
     },
     {
       "robot": "OwnShip",

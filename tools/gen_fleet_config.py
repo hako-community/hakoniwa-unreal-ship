@@ -46,6 +46,7 @@ SHIP_SPECS = SHIPNAVI.parent / "images" / "image2sim-framework" / "output"
 # 船載カメラ（SHP-25）：船舶生成器の取り付け位置（mounts の camera_rgb）→ 書き戻す PDU（pdu_config_ship.json）
 AUTONOMY_PDU = "autonomy_status"
 FOC_PDU = "foc_command"   # SHP-26 デモ③：FOC の指令（引き継ぎ・再開）を FOC 画面に出す
+TRAFFIC_PDU = "traffic"   # SHP-28：海域の交通（再生の他船。PointCloud2、1 点 = 1 隻）
 CAMERA_PDUS = {"camera_bow_center": "camera_bow", "camera_bridge_front": "camera_bridge"}
 CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_RATE_HZ = 640, 480, 10.0
 # 取り付け位置は船舶生成器のカメラの筐体（上部構造物のメッシュの暗い箱、前へ最大 0.58 m）の中。筐体を写さないよう手前を切る [m]
@@ -281,6 +282,7 @@ def build() -> dict:
     own = fleet["overlays"]["own_ship"]
     wanted.append((own, AUTONOMY_PDU))
     wanted.append((own, FOC_PDU))
+    wanted.append((own, TRAFFIC_PDU))
     cams = cameras(fleet, ships)
     pdus = []
     for robot, name in wanted:
@@ -310,6 +312,7 @@ def build() -> dict:
         # ブリッジ視界・FOC の表示（SHP-25 Step 2）：Godot の工学オーバレイと同じ値（速度の推定の窓・OZT・ベクトルの長さ・航跡）
         "overlays": {k: fleet["overlays"][k] for k in ("own_ship", "velocity_window_s", "trail", "ais", "ozt")},
         "autonomy_status": {"robot": fleet["overlays"]["own_ship"], "pdu": AUTONOMY_PDU, "foc_pdu": FOC_PDU},
+        "traffic": {"robot": fleet["overlays"]["own_ship"], "pdu": TRAFFIC_PDU},
         "cameras": cams,
         "pdus": pdus,
         "ships": ships,
