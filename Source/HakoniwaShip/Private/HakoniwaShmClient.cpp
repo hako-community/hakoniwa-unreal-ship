@@ -3,6 +3,7 @@
 // 箱庭にアセットとして登録し、描画とは別のスレッド（FHakoniwaTimeSyncWorker）から世界の時刻に追従して時刻を報告する。
 // 描画が遅れても世界の時刻は止まらない。drone から変えたのは、HAKO_CONFIG_PATH が既にあれば上書きしないことだけ。
 #include "HakoniwaShmClient.h"
+#include <atomic>
 #include "Framework/Application/IInputProcessor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Modules/ModuleManager.h"
@@ -57,6 +58,18 @@ public:
         bStopRequested = true;
     }
 
+    /** 実時間に対する速さを途中で変える（デモの録画：平常は早送り・見せ場は等速）。次のループで今のアセット時刻から測り直す */
+    void SetTargetRealTimeFactor(double Factor)
+    {
+        PendingRtf.store(FMath::Max(0.01, Factor));
+    }
+
+    /** アセット時刻の上限 [usec]（録画：表示が追いつくまで物理を先へ進めない）。負なら上限なし */
+    void SetTimeCeilingUsec(long long Usec)
+    {
+        TimeCeilingUsec.store(Usec);
+    }
+
 private:
     void ResetPacing()
     {
@@ -66,6 +79,17 @@ private:
 
     void ProcessOnce(double Now)
     {
+        const double NewRtf = PendingRtf.exchange(-1.0);
+        if (NewRtf > 0.0 && NewRtf != TargetRealTimeFactor)
+        {
+            TargetRealTimeFactor = NewRtf;
+            if (bPacingInitialized)
+            {
+                PacingBaseWallTime = Now;
+                PacingBaseSimTimeUsec = AssetTimeUsec;
+            }
+            UE_LOG(LogTemp, Log, TEXT("[HakoRuntime][TimeSync] asset=%s target_rtf=%.3f at asset_time_usec=%lld"), *AssetName, TargetRealTimeFactor, AssetTimeUsec);
+        }
         const double LoopGapSec = LastLoopWallTime > 0.0 ? Now - LastLoopWallTime : 0.0;
         LastLoopWallTime = Now;
 
@@ -149,6 +173,10 @@ private:
                 {
                     PacingTargetUsec = WorldTimeUsec;
                 }
+                if (const long long Ceil = TimeCeilingUsec.load(); Ceil >= 0)
+                {
+                    PacingTargetUsec = FMath::Min(PacingTargetUsec, Ceil);
+                }
 
                 if (PacingTargetUsec > AssetTimeUsec)
                 {
@@ -208,6 +236,8 @@ private:
     FString AssetName;
     bool bEnableRealTimePacing = true;
     double TargetRealTimeFactor = 1.0;
+    std::atomic<double> PendingRtf {-1.0};
+    std::atomic<long long> TimeCeilingUsec {-1};
     double IntervalSec = 0.005;
     FThreadSafeBool bStopRequested = false;
     long long AssetTimeUsec = 0;
@@ -403,6 +433,23 @@ void AHakoniwaShmClient::PreDeclareAllPDUs()
 void AHakoniwaShmClient::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+}
+
+void AHakoniwaShmClient::SetTimeCeiling(double Sec)
+{
+    if (TimeSyncWorker)
+    {
+        TimeSyncWorker->SetTimeCeilingUsec(Sec < 0.0 ? -1 : static_cast<long long>(Sec * 1000000.0));
+    }
+}
+
+void AHakoniwaShmClient::SetRealTimeFactor(float Factor)
+{
+    TargetRealTimeFactor = Factor;
+    if (TimeSyncWorker)
+    {
+        TimeSyncWorker->SetTargetRealTimeFactor(Factor);
+    }
 }
 
 bool AHakoniwaShmClient::StartTimeSyncWorker()

@@ -72,5 +72,10 @@ private:
     bool EnsureRuntimeObjects();
     void PreDeclareAllPDUs();
     bool StartTimeSyncWorker();
+public:
+    /** 実時間に対する速さを途中で変える（-ShipRtfSchedule、デモの録画） */
+    void SetRealTimeFactor(float Factor);
+    void SetTimeCeiling(double Sec);
+private:
     void StopTimeSyncWorker();
 };

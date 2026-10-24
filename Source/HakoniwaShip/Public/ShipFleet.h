@@ -208,6 +208,35 @@ private:
 		double LastSeen = -1.0;
 	};
 	TMap<uint32, FTrafficShip> Traffic;
+	// 録画の速さの予定（-ShipRtfSchedule=物理時刻:速さ,...、例 0:4,1050:1,1250:4）。表示時刻もこの速さで進める
+	TArray<TPair<double, double>> RtfSchedule;
+	double CurrentRtf = 1.0;
+	// 画面の予定（-ShipViewSchedule=物理時刻:chase|bridge|foc|free,...、デモの録画）
+	TArray<TPair<double, EShipView>> ViewSchedule;
+	int32 ViewScheduleIndex = -1;
+	// 録画（-ShipMovie=フォルダ、-ShipMovieFps=30）：1 コマ = 速さ / MovieFps の物理時間で表示時刻を進め、各コマを JPEG で書き出す。
+	// 物理は表示時刻の少し先まで（ビューアの箱庭の時刻の上限）。画面の外から撮らないので、窓が隠れても描画が遅くても乱れない
+	FString MovieDir;
+	double MovieFps = 30.0;
+	int32 MovieFrame = 0;
+	bool bMovieAdvanced = false;
+	bool bMovieShotPending = false;
+	double MovieShotTime = 0.0;
+	double MovieShotRtf = 1.0;
+	FDelegateHandle MovieHandle;
+	TArray<FString> MovieLines;
+	void UpdateMovieClock();
+	void OnMovieShot(int32 W, int32 H, const TArray<FColor>& Colors);
+	void StopMovie();
+	// 見た目の細かい波の時刻（実時間の速さ、速さ 1 以下ならその速さ）
+	double RippleClock = 0.0;
+	// 波の速さの上限（-ShipWaveRtfCap=、録画）：早送りの速さがこれを超える間、海面の時刻はこの速さで進める（船の上下は物理のまま。見た目だけ）
+	double WaveRtfCap = 0.0;
+	double WaveClock = -1.0;
+	double WavePrevDisplay = -1.0;
+	class AHakoniwaShmClient* GetShmClient();
+	TWeakObjectPtr<class AHakoniwaShmClient> ShmClient;
+	void UpdateRtf();
 	FString TrafficRobot;
 	FString TrafficPdu;
 	TMap<FString, TSharedPtr<FJsonObject>> ModelSpecs;   // model → fleet_ue.json の ships[] の形

@@ -93,6 +93,9 @@ void AShipLighting::Apply()
 		Post->Settings.bOverride_AutoExposureMaxBrightness = true;
 		Post->Settings.AutoExposureMinBrightness = Ev;
 		Post->Settings.AutoExposureMaxBrightness = Ev;
+		// モーションブラーは切る（既定は 0.5。早送りの録画では船・波が大きく動くたびに画面がぶれる）
+		Post->Settings.bOverride_MotionBlurAmount = true;
+		Post->Settings.MotionBlurAmount = 0.0f;
 	}
 	if (SkyLight)
 	{

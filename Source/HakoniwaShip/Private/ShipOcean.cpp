@@ -262,13 +262,24 @@ void AShipOcean::Tick(float DeltaSeconds)
 	{
 		TimeSec = GetWorld()->GetTimeSeconds();
 	}
-	// メッシュの中心をカメラの真下へ（格子の間隔でそろえる）
+	// メッシュの中心をカメラの真下へ
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController(); PC && PC->PlayerCameraManager)
 	{
 		const FVector Cam = ShipFrame::UnrealToLocal(PC->PlayerCameraManager->GetCameraLocation());
-		CenterEnu = FVector2D(FMath::RoundToDouble(Cam.X / StepM) * StepM, FMath::RoundToDouble(Cam.Y / StepM) * StepM);
+		// 連続に追う（格子の間隔でそろえない）。そろえると寄せ直すたびに海全体の見え方が一度に変わり、
+		// 船の速さで 1 s に 1〜10 回カクつく（録画の隣のコマの差：最大 4.2 → 0.7、デモ動画）。-ShipOceanSnap で前のふるまい
+		static const bool bSnap = FParse::Param(FCommandLine::Get(), TEXT("ShipOceanSnap"));
+		CenterEnu = bSnap ? FVector2D(FMath::RoundToDouble(Cam.X / StepM) * StepM, FMath::RoundToDouble(Cam.Y / StepM) * StepM) : FVector2D(Cam.X, Cam.Y);
 	}
-	SetActorLocation(ShipFrame::LocalToUnreal(CenterEnu.X, CenterEnu.Y, 0.0));
+	const FVector NewLoc = ShipFrame::LocalToUnreal(CenterEnu.X, CenterEnu.Y, 0.0);
+	if (!NewLoc.Equals(GetActorLocation(), 1.0))
+	{
+		SetActorLocation(NewLoc);
+		// メッシュを動かしても海面は世界に対して動いていない（位相を中心の分だけずらす）。動いたことにすると、
+		// モーションブラー・TSR が海全体を動いたものとして描く
+		Near->ResetSceneVelocity();
+		Far->ResetSceneVelocity();
+	}
 	UpdateGpu();
 	if (bAutoSurfaceCheck && TimeSec >= NextAutoCheck)
 	{
@@ -300,7 +311,8 @@ void AShipOcean::UpdateGpu()
 	{
 		const FRipple& R = Ripples[j];
 		(*Data)[MaxWaves + j] = FLinearColor(R.Kx, R.Ky, R.Amp * RippleStrength, 0.0f);
-		(*Data)[TexWidth + MaxWaves + j] = FLinearColor(Wrap2Pi(R.Phase - R.Omega * T + R.Kx * CE + R.Ky * CN), 0.0f, 0.0f, 0.0f);
+		const double TR = RippleTimeSec >= 0.0 ? RippleTimeSec : T;
+		(*Data)[TexWidth + MaxWaves + j] = FLinearColor(Wrap2Pi(R.Phase - R.Omega * TR + R.Kx * CE + R.Ky * CN), 0.0f, 0.0f, 0.0f);
 	}
 	FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, TexWidth, 2);
 	WaveTex->UpdateTextureRegions(0, 1, Region, TexWidth * sizeof(FLinearColor), sizeof(FLinearColor), reinterpret_cast<uint8*>(Data->GetData()),

@@ -63,6 +63,8 @@ public:
 	void SetWaveParams(const ShipWave::FParams& P);
 	/** 海面の時刻を物理時刻にする（D19）。以後ゲームの時刻は使わない */
 	void SetPhysicsTime(double T);
+	// 見た目だけの細かい波（Ripple）の時刻。早送りでも実時間の速さで動かす（物理の時刻だと 0.6 s 周期の波が 10 倍速でちらつく）
+	void SetRippleTime(double T) { RippleTimeSec = T; }
 
 	bool IsWaveActive() const { return bActive; }
 	const ShipWave::FParams& GetWaveParams() const { return Params; }
@@ -109,6 +111,7 @@ private:
 	double ActiveHs = ShipWave::DefaultActiveHs;
 
 	double TimeSec = 0.0;
+	double RippleTimeSec = -1.0;
 	bool bPhysicsTime = false;
 	double StepM = 4.0;
 	FVector2D CenterEnu = FVector2D::ZeroVector;   // メッシュの中心（東, 北）[m]

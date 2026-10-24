@@ -36,6 +36,11 @@
 #include "TextureResource.h"
 #include "EngineUtils.h"
 #include "UnrealClient.h"
+#include "Engine/GameViewportClient.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "Modules/ModuleManager.h"
+#include "Async/Async.h"
 
 #include "pdu_convertor.hpp"
 #include "geometry_msgs/pdu_cpptype_conv_Twist.hpp"
@@ -277,6 +282,47 @@ void AShipFleet::BeginPlay()
 	FParse::Value(Cmd, TEXT("-ShipSamples="), SamplesPath);
 	FParse::Value(Cmd, TEXT("-ShipShot="), ShotPath);
 	FParse::Value(Cmd, TEXT("-ShipFrameLog="), FrameLogPath);
+	FString RtfArg;
+	if (FParse::Value(Cmd, TEXT("-ShipRtfSchedule="), RtfArg, false))
+	{
+		TArray<FString> Items;
+		RtfArg.ParseIntoArray(Items, TEXT(","));
+		for (const FString& It : Items)
+		{
+			FString A, B;
+			if (It.Split(TEXT(":"), &A, &B))
+			{
+				RtfSchedule.Add(TPair<double, double>(FCString::Atod(*A), FMath::Max(0.05, FCString::Atod(*B))));
+			}
+		}
+		RtfSchedule.Sort([](const TPair<double, double>& X, const TPair<double, double>& Y) { return X.Key < Y.Key; });
+		UE_LOG(LogShipFleet, Log, TEXT("real-time factor schedule: %s (%d entries)"), *RtfArg, RtfSchedule.Num());
+	}
+	if (FParse::Value(Cmd, TEXT("-ShipMovie="), MovieDir))
+	{
+		FParse::Value(Cmd, TEXT("-ShipMovieFps="), MovieFps);
+		MovieDir = FPaths::ConvertRelativePathToFull(MovieDir);
+		IFileManager::Get().MakeDirectory(*MovieDir, true);
+		MovieHandle = UGameViewportClient::OnScreenshotCaptured().AddUObject(this, &AShipFleet::OnMovieShot);
+		UE_LOG(LogShipFleet, Log, TEXT("movie: %s at %.1f fps"), *MovieDir, MovieFps);
+	}
+	FParse::Value(Cmd, TEXT("-ShipWaveRtfCap="), WaveRtfCap);
+	FString ViewSchedArg;
+	if (FParse::Value(Cmd, TEXT("-ShipViewSchedule="), ViewSchedArg, false))
+	{
+		TArray<FString> Items;
+		ViewSchedArg.ParseIntoArray(Items, TEXT(","));
+		for (const FString& It : Items)
+		{
+			FString A, B;
+			if (It.Split(TEXT(":"), &A, &B))
+			{
+				const EShipView V = B == TEXT("bridge") ? EShipView::Bridge : (B == TEXT("foc") ? EShipView::Foc : (B == TEXT("free") ? EShipView::Free : EShipView::Chase));
+				ViewSchedule.Add(TPair<double, EShipView>(FCString::Atod(*A), V));
+			}
+		}
+		ViewSchedule.Sort([](const TPair<double, EShipView>& X, const TPair<double, EShipView>& Y) { return X.Key < Y.Key; });
+	}
 	bChase = FParse::Param(Cmd, TEXT("ShipChase")) || !ShotPath.IsEmpty();
 	FString Toward;
 	bChaseTowardLight = FParse::Value(Cmd, TEXT("-ShipChaseToward="), Toward) && Toward == TEXT("light");
@@ -825,6 +871,7 @@ void AShipFleet::LogStatus(double PhysicsTime)
 void AShipFleet::FinishCheck(double PhysicsTime)
 {
 	bDone = true;
+	StopMovie();
 	TArray<FString> Problems;
 	double PosErr = 0.0, AngErr = 0.0, JointErr = 0.0;
 	for (const FShipSync& S : Sync)
@@ -875,7 +922,7 @@ void AShipFleet::FinishCheck(double PhysicsTime)
 	}
 	if (!FrameLogPath.IsEmpty())
 	{
-		FFileHelper::SaveStringToFile(TEXT("wall,dt,physics,new,display\n") + FString::Join(FrameLines, TEXT("\n")) + TEXT("\n"), *FrameLogPath);
+		FFileHelper::SaveStringToFile(TEXT("wall,dt,physics,new,display,utc\n") + FString::Join(FrameLines, TEXT("\n")) + TEXT("\n"), *FrameLogPath);
 	}
 	TArray<FString> Counts;
 	for (const FShipSync& S : Sync)
@@ -1031,6 +1078,122 @@ void AShipFleet::CheckNavLights()
 	{
 		UE_LOG(LogShipFleet, Error, TEXT("HAKONIWA_UNREAL_SHIP_NAVLIGHT_FAILED %d problems: %s"), Problems.Num(),
 			*FString::Join(TArrayView<const FString>(Problems.GetData(), FMath::Min(Problems.Num(), 8)), TEXT("; ")));
+	}
+}
+
+void AShipFleet::UpdateRtf()
+{
+	if (LastPhysicsTime < 0.0)
+	{
+		return;
+	}
+	// 画面の予定：表示時刻が次の切り替えの時刻を過ぎたら切り替える
+	while (ViewScheduleIndex + 1 < ViewSchedule.Num() && DisplayTime >= ViewSchedule[ViewScheduleIndex + 1].Key)
+	{
+		++ViewScheduleIndex;
+		SetView(ViewSchedule[ViewScheduleIndex].Value);
+	}
+	if (RtfSchedule.Num() == 0)
+	{
+		return;
+	}
+	// 録画のときは表示時刻で選ぶ（物理は上限まで先に進んでいる）。箱庭の速さは上げておき、物理の進みは時刻の上限で決める
+	const double TNow = MovieDir.IsEmpty() ? LastPhysicsTime : DisplayTime;
+	double Want = RtfSchedule[0].Value;
+	for (const TPair<double, double>& P : RtfSchedule)
+	{
+		if (TNow >= P.Key) { Want = P.Value; }
+	}
+	if (Want == CurrentRtf)
+	{
+		return;
+	}
+	if (MovieDir.IsEmpty())
+	{
+		AHakoniwaShmClient* C = GetShmClient();
+		if (!C)
+		{
+			return;
+		}
+		C->SetRealTimeFactor(static_cast<float>(Want));
+	}
+	UE_LOG(LogShipFleet, Log, TEXT("real-time factor %.2f -> %.2f at t=%.2f s"), CurrentRtf, Want, TNow);
+	CurrentRtf = Want;
+}
+
+AHakoniwaShmClient* AShipFleet::GetShmClient()
+{
+	if (!ShmClient.IsValid())
+	{
+		ShmClient = Cast<AHakoniwaShmClient>(FindClient());
+	}
+	return ShmClient.Get();
+}
+
+void AShipFleet::UpdateMovieClock()
+{
+	// 1 コマ = 速さ / MovieFps の物理時間。補間に要る物理（最新 − DisplayDelay）が届くまで待つ（待つ間は撮らない）
+	const double Target = LastPhysicsTime - DisplayDelay;
+	const double Step = CurrentRtf / MovieFps;
+	const double Prev = DisplayTime;
+	bMovieAdvanced = false;
+	if (DisplayTime < 0.0)
+	{
+		DisplayTime = FMath::Max(Target, 0.0);
+		bMovieAdvanced = true;
+	}
+	else if (DisplayTime + Step <= Target)
+	{
+		DisplayTime += Step;
+		bMovieAdvanced = true;
+	}
+	++DisplayFrames;
+	DisplayHolds += DisplayTime <= Prev ? 1 : 0;
+	DisplayLagMax = FMath::Max(DisplayLagMax, LastPhysicsTime - DisplayTime);
+	if (AHakoniwaShmClient* C = GetShmClient())
+	{
+		C->SetRealTimeFactor(100.0f);
+		C->SetTimeCeiling(DisplayTime + DisplayDelay + Step + 0.5);
+	}
+}
+
+void AShipFleet::OnMovieShot(int32 W, int32 H, const TArray<FColor>& Colors)
+{
+	if (!bMovieShotPending || MovieDir.IsEmpty())
+	{
+		return;
+	}
+	bMovieShotPending = false;
+	const int32 Index = MovieFrame++;
+	MovieLines.Add(FString::Printf(TEXT("%d,%.4f,%.3f,%d"), Index, MovieShotTime, MovieShotRtf, static_cast<int32>(View)));
+	const FString File = FPaths::Combine(MovieDir, FString::Printf(TEXT("f%06d.jpg"), Index));
+	TArray<FColor> Copy = Colors;
+	Async(EAsyncExecution::ThreadPool, [File, W, H, Copy = MoveTemp(Copy)]() mutable
+	{
+		for (FColor& C : Copy) { C.A = 255; }
+		IImageWrapperModule& M = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+		TSharedPtr<IImageWrapper> Jpg = M.CreateImageWrapper(EImageFormat::JPEG);
+		if (Jpg.IsValid() && Jpg->SetRaw(Copy.GetData(), Copy.Num() * sizeof(FColor), W, H, ERGBFormat::BGRA, 8))
+		{
+			FFileHelper::SaveArrayToFile(Jpg->GetCompressed(93), *File);
+		}
+	});
+}
+
+void AShipFleet::StopMovie()
+{
+	if (MovieDir.IsEmpty())
+	{
+		return;
+	}
+	UGameViewportClient::OnScreenshotCaptured().Remove(MovieHandle);
+	FFileHelper::SaveStringToFile(TEXT("frame,display,rtf,view\n") + FString::Join(MovieLines, TEXT("\n")) + TEXT("\n"), *FPaths::Combine(MovieDir, TEXT("movie.csv")));
+	UE_LOG(LogShipFleet, Log, TEXT("movie: %d frames -> %s"), MovieFrame, *MovieDir);
+	MovieDir.Empty();
+	if (AHakoniwaShmClient* C = GetShmClient())
+	{
+		C->SetTimeCeiling(-1.0);
+		C->SetRealTimeFactor(static_cast<float>(CurrentRtf));
 	}
 }
 
@@ -1365,7 +1528,7 @@ void AShipFleet::UpdateChase(float DeltaSeconds)
 void AShipFleet::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (bChase)
+	if (bChase && MovieDir.IsEmpty())
 	{
 		UpdateChase(DeltaSeconds);
 	}
@@ -1521,7 +1684,17 @@ void AShipFleet::Tick(float DeltaSeconds)
 			PushSamples(S, LastPhysicsTime);
 		}
 	}
-	UpdateDisplayClock(DeltaSeconds);
+	UpdateRtf();
+	if (MovieDir.IsEmpty())
+	{
+		UpdateDisplayClock(DeltaSeconds * CurrentRtf);
+	}
+	else
+	{
+		UpdateMovieClock();
+	}
+	// 見た目の時間の刻み：録画は 1 コマ 1/MovieFps（進まなかったコマは 0）
+	const double VisDt = MovieDir.IsEmpty() ? DeltaSeconds : (bMovieAdvanced ? 1.0 / MovieFps : 0.0);
 	if (FirstDisplayTime >= 0.0 && DisplayTime > FirstDisplayTime + 5.0)
 	{
 		++HitchFrames;
@@ -1536,6 +1709,10 @@ void AShipFleet::Tick(float DeltaSeconds)
 		ApplyAt(S, DisplayTime);
 	}
 	ApplyTraffic(DisplayTime);
+	if (bChase && !MovieDir.IsEmpty() && VisDt > 0.0)
+	{
+		UpdateChase(static_cast<float>(VisDt));   // 録画：このコマの船の位置へ（ふだんは前のフレームの位置）
+	}
 	// 船載カメラ（SHP-25）：船と海面が表示時刻で置かれたこのフレームを撮る（画像の時刻 = 表示時刻）。届いた画像を PDU に書く
 	for (UShipCamera* Cam : Cameras)
 	{
@@ -1559,9 +1736,19 @@ void AShipFleet::Tick(float DeltaSeconds)
 	if (Ocean)
 	{
 		// 海面は船と同じ表示時刻で描く（D19：受信した姿勢と同じ物理時刻の海面。補間した姿勢には同じ時刻の海面）
-		Ocean->SetPhysicsTime(DisplayTime);
+		double SeaTime = DisplayTime;
+		if (WaveRtfCap > 0.0)
+		{
+			// 録画：早送りの速さが上限を超える間は、海面の時刻を上限の速さで進める（見た目だけ。船の上下は物理のまま）
+			WaveClock = WaveClock < 0.0 ? DisplayTime : WaveClock + FMath::Max(0.0, DisplayTime - WavePrevDisplay) * FMath::Min(1.0, WaveRtfCap / CurrentRtf);
+			WavePrevDisplay = DisplayTime;
+			SeaTime = WaveClock;
+		}
+		Ocean->SetPhysicsTime(SeaTime);
+		RippleClock += VisDt * FMath::Min(CurrentRtf, 1.0);
+		Ocean->SetRippleTime(RippleClock);
 		++ClockFrames;
-		ClockFromPhysics += Ocean->GetTime() == DisplayTime ? 1 : 0;
+		ClockFromPhysics += Ocean->GetTime() == SeaTime ? 1 : 0;
 		if (CheckSec > 0.0 && DisplayTime > SettleSec)
 		{
 			SampleHeave();
@@ -1574,7 +1761,17 @@ void AShipFleet::Tick(float DeltaSeconds)
 	}
 	if (!FrameLogPath.IsEmpty())
 	{
-		FrameLines.Add(FString::Printf(TEXT("%.6f,%.6f,%.6f,%d,%.6f"), FPlatformTime::Seconds(), DeltaSeconds, LastPhysicsTime, Stamp >= 0.0 ? 1 : 0, DisplayTime));
+		// utc：UNIX 時刻 [s]（録画の ffmpeg の壁時計の時刻印と合わせ、映像の各フレームの物理時刻を求める。デモ動画）
+		const double Utc = (FDateTime::UtcNow() - FDateTime(1970, 1, 1)).GetTotalSeconds();
+		FrameLines.Add(FString::Printf(TEXT("%.6f,%.6f,%.6f,%d,%.6f,%.3f"), FPlatformTime::Seconds(), DeltaSeconds, LastPhysicsTime, Stamp >= 0.0 ? 1 : 0, DisplayTime, Utc));
+	}
+	if (!MovieDir.IsEmpty() && bMovieAdvanced)
+	{
+		// このコマ（表示時刻で船・海面を置いた）の描画を撮る。画面の文字（HUD）も写す
+		bMovieShotPending = true;
+		MovieShotTime = DisplayTime;
+		MovieShotRtf = CurrentRtf;
+		FScreenshotRequest::RequestScreenshot(FString(), true, false);
 	}
 	LogStatus(LastPhysicsTime);
 	if (CheckSec > 0.0 && DisplayTime - FirstDisplayTime >= CheckSec)
