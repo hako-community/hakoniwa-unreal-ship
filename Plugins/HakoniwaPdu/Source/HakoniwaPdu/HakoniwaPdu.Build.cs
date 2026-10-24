@@ -118,7 +118,10 @@ public class HakoniwaPdu : ModuleRules
                 Path.Combine(DefaultCoreRoot, "bin"),
                 "shakoc.dll",
                 Path.Combine(ModuleDirectory, "../../../../Binaries/Win64/shakoc.dll"));
-            if (File.Exists(DllPath))
+            // 実行時の依存として配置できるのはプロジェクトかエンジンの下だけ（パッケージ版で外の shakoc.dll は拒否される）。
+            // 外にあるとき（船の DLL は shipnavi\build\shakoc-dll）は登録せず、配布版では bin に置いて HAKO_CORE_DLL_PATH で読む（SHP-30）
+            string ProjectRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../../.."));
+            if (File.Exists(DllPath) && Path.GetFullPath(DllPath).StartsWith(ProjectRoot, StringComparison.OrdinalIgnoreCase))
             {
                 RuntimeDependencies.Add(DllPath);
             }
